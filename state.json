@@ -280,6 +280,18 @@
    "f_confirm": false,
    "f_invalid": true,
    "touch_time": "2026-10-05T17:15:00+00:00"
+  },
+  "long_20261005T1405": {
+   "type": "long",
+   "lo": 4134.325,
+   "hi": 4140.125,
+   "formed": "2026-10-05T14:05:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
   }
  }
 }
