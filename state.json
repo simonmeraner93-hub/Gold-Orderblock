@@ -252,9 +252,10 @@
    "status": "active",
    "alerted": false,
    "f_new": true,
-   "f_touch": false,
-   "f_confirm": false,
-   "f_invalid": false
+   "f_touch": true,
+   "f_confirm": true,
+   "f_invalid": false,
+   "touch_time": "2026-10-05T19:00:00+00:00"
   },
   "short_20261005T0550": {
    "type": "short",
