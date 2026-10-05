@@ -85,7 +85,7 @@ def find_blocks(df):
 
 
 def main():
-            tg("✅ Test: Bot läuft")
+    tg("✅ Test: Bot läuft")
     now = datetime.now(timezone.utc)
     if now.weekday() >= 5:
         return
