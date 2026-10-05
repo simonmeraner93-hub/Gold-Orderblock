@@ -275,12 +275,12 @@
    "lo": 4140.37,
    "hi": 4142.26,
    "formed": "2026-10-05T22:00:00+00:00",
-   "status": "active",
+   "status": "invalid",
    "alerted": true,
    "f_new": true,
    "f_touch": true,
    "f_confirm": false,
-   "f_invalid": false,
+   "f_invalid": true,
    "touch_time": "2026-10-05T22:10:00+00:00"
   }
  }
