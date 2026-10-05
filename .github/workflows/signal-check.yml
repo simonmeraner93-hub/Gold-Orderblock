@@ -1,5 +1,6 @@
 name: Orderblock Signal Check
-
+permissions:
+  contents: write
 on:
   schedule:
     - cron: '*/5 * * * *'
