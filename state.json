@@ -1,0 +1,101 @@
+{
+ "zones": {
+  "short_20261004T2210": {
+   "type": "short",
+   "lo": 4141.715,
+   "hi": 4146.53,
+   "formed": "2026-10-04T22:10:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261005T0020": {
+   "type": "long",
+   "lo": 4147.94,
+   "hi": 4153.09,
+   "formed": "2026-10-05T00:20:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261005T0100": {
+   "type": "long",
+   "lo": 4154.3099999999995,
+   "hi": 4156.63,
+   "formed": "2026-10-05T01:00:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "short_20261005T0215": {
+   "type": "short",
+   "lo": 4159.415,
+   "hi": 4163.515,
+   "formed": "2026-10-05T02:15:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "short_20261005T0245": {
+   "type": "short",
+   "lo": 4153.15,
+   "hi": 4155.75,
+   "formed": "2026-10-05T02:45:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "short_20261005T0410": {
+   "type": "short",
+   "lo": 4138.62,
+   "hi": 4141.32,
+   "formed": "2026-10-05T04:10:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261005T0440": {
+   "type": "long",
+   "lo": 4124.595,
+   "hi": 4133.41,
+   "formed": "2026-10-05T04:40:00+00:00",
+   "status": "active",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": true,
+   "f_confirm": true,
+   "f_invalid": false,
+   "touch_time": "2026-10-05T04:45:00+00:00"
+  },
+  "long_20261005T0540": {
+   "type": "long",
+   "lo": 4133.42,
+   "hi": 4137.22,
+   "formed": "2026-10-05T05:40:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  }
+ }
+}
