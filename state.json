@@ -133,9 +133,10 @@
    "status": "active",
    "alerted": true,
    "f_new": true,
-   "f_touch": false,
+   "f_touch": true,
    "f_confirm": false,
-   "f_invalid": false
+   "f_invalid": false,
+   "touch_time": "2026-10-06T08:25:00+00:00"
   },
   "long_20261005T1720": {
    "type": "long",
