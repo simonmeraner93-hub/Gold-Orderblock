@@ -75,18 +75,6 @@
    "f_confirm": false,
    "f_invalid": true
   },
-  "short_20261005T0400": {
-   "type": "short",
-   "lo": 4143.045,
-   "hi": 4147.075,
-   "formed": "2026-10-05T04:00:00+00:00",
-   "status": "invalid",
-   "alerted": false,
-   "f_new": true,
-   "f_touch": false,
-   "f_confirm": false,
-   "f_invalid": true
-  },
   "long_20261005T0655": {
    "type": "long",
    "lo": 4148.7,
