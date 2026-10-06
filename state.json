@@ -282,6 +282,18 @@
    "f_touch": false,
    "f_confirm": false,
    "f_invalid": true
+  },
+  "short_20261005T1810": {
+   "type": "short",
+   "lo": 4136.86,
+   "hi": 4140.46,
+   "formed": "2026-10-05T18:10:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
   }
  }
 }
