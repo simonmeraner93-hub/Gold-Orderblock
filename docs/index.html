@@ -8,18 +8,20 @@
 body{margin:0;background:#0b0f17;color:#e6e9ef;font-family:system-ui,sans-serif}
 header{padding:12px 14px}
 h1{font-size:18px;margin:0 0 4px}
+h2{font-size:15px;margin:14px 0 0}
 #upd{font-size:12px;color:#8b93a5}
 .tabs{display:flex;gap:8px;padding:0 14px 8px}
 .tabs button{flex:1;padding:10px;border-radius:10px;border:1px solid #2a3142;background:#141a26;color:#e6e9ef;font-size:15px}
 .tabs button.on{background:#2b6cff;border-color:#2b6cff}
 canvas{width:100%;height:55vh;display:block}
 label{display:block;padding:6px 14px;font-size:14px;color:#8b93a5}
-.list{padding:0 14px 30px}
+.list{padding:0 14px 20px}
 .z{display:flex;justify-content:space-between;padding:10px;margin-top:8px;border-radius:10px;background:#141a26;border-left:4px solid}
 .z.long{border-color:#22c55e}
 .z.short{border-color:#ef4444}
+.z.e{background:#1d2433}
 .z small{color:#8b93a5;display:block}
-.st{font-size:13px;align-self:center}
+.st{font-size:13px;align-self:center;text-align:right}
 </style>
 </head>
 <body>
@@ -34,7 +36,12 @@ label{display:block;padding:6px 14px;font-size:14px;color:#8b93a5}
 </div>
 <canvas id="cv"></canvas>
 <label><input type="checkbox" id="inv"> ungültige Zonen zeigen</label>
-<div class="list" id="list"></div>
+<div class="list">
+<h2>Einstiege</h2>
+<div id="ent"></div>
+<h2>Zonen</h2>
+<div id="list"></div>
+</div>
 <script>
 let DATA=null,frame="M5";
 const cv=document.getElementById("cv");
@@ -68,7 +75,7 @@ function draw(){
   const cs=DATA.frames[frame].candles;
   const lo=Math.min(...cs.map(c=>c.l));
   const hi=Math.max(...cs.map(c=>c.h));
-  const padR=52,padT=10,padB=10;
+  const padR=52,padT=10,padB=16;
   const cw=(W-padR)/cs.length;
   const y=p=>padT+(hi-p)/(hi-lo)*(H-padT-padB);
   const cl=v=>Math.max(padT,Math.min(H-padB,v));
@@ -107,6 +114,23 @@ function draw(){
     ctx.fillRect(x-cw*0.35,top,cw*0.7,hgt);
   });
 
+  (DATA.entries||[]).forEach(e=>{
+    let idx=-1;
+    for(let i=0;i<cs.length;i++){if(cs[i].t<=e.t)idx=i;}
+    if(idx<0)return;
+    const x=idx*cw+cw/2;
+    ctx.fillStyle="#facc15";
+    ctx.beginPath();
+    if(e.kind==="long"){
+      const yy=cl(y(cs[idx].l))+3;
+      ctx.moveTo(x,yy);ctx.lineTo(x-7,yy+12);ctx.lineTo(x+7,yy+12);
+    }else{
+      const yy=cl(y(cs[idx].h))-3;
+      ctx.moveTo(x,yy);ctx.lineTo(x-7,yy-12);ctx.lineTo(x+7,yy-12);
+    }
+    ctx.closePath();ctx.fill();
+  });
+
   const last=cs[cs.length-1].c;
   ctx.fillStyle="#2b6cff";
   ctx.fillRect(W-padR,y(last)-9,padR,18);
@@ -123,6 +147,16 @@ function list(){
     '<small>'+new Date(b.t*1000).toLocaleString("de-DE")+'</small></div>'+
     '<div class="st">'+ST[b.status]+'</div></div>'
   ).join("")||"<p>Keine Zonen</p>";
+
+  const en=document.getElementById("ent");
+  const es=(DATA.entries||[]).slice().sort((a,b)=>b.t-a.t).slice(0,10);
+  en.innerHTML=es.map(e=>
+    '<div class="z e '+e.kind+'"><div><b>'+(e.kind==="long"?"Long":"Short")+
+    '-Einstieg</b> ca. '+e.price.toFixed(2)+
+    '<small>'+new Date(e.t*1000).toLocaleString("de-DE")+
+    ' · Zone '+e.lo.toFixed(2)+' - '+e.hi.toFixed(2)+'</small></div>'+
+    '<div class="st">Stop<br>'+e.stop.toFixed(2)+'</div></div>'
+  ).join("")||"<p>Noch keine Einstiege</p>";
 }
 
 function render(){draw();list();}
