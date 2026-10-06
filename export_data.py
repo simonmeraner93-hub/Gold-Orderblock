@@ -7,6 +7,7 @@ import pandas as pd
 BASE = "https://demo-api-capital.backend-capital.com/api/v1"
 EPIC = "GOLD"
 FRAMES = {"M5": "MINUTE_5", "M15": "MINUTE_15", "H1": "HOUR"}
+GAP = {"M5": 1.0, "M15": 2.0, "H1": 4.0}
 STRONG = 1.5
 SWING = 10
 SHOW = 120
@@ -49,6 +50,18 @@ def get_candles(h, resolution):
             "close": mid("closePrice"),
         })
     return pd.DataFrame(rows).sort_values("time").reset_index(drop=True)
+
+
+def get_trend(h1):
+    c = h1["close"]
+    e20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
+    e50 = c.ewm(span=50, adjust=False).mean().iloc[-1]
+    last = c.iloc[-1]
+    if e20 > e50 and last > e50:
+        return "long"
+    if e20 < e50 and last < e50:
+        return "short"
+    return "neutral"
 
 
 def find_blocks(df):
@@ -100,6 +113,37 @@ def find_blocks(df):
             "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
             "t": int(df.iloc[k].time.timestamp()), "status": status,
         })
+    return result
+
+
+def merge(blocks, gap):
+    result = []
+    for kind in ("long", "short"):
+        grp = sorted(
+            [b for b in blocks if b["kind"] == kind and b["status"] != "ungueltig"],
+            key=lambda b: b["lo"],
+        )
+        cur = None
+        for b in grp:
+            if cur is not None and b["lo"] <= cur["hi"] + gap:
+                cur["hi"] = max(cur["hi"], b["hi"])
+                cur["lo"] = min(cur["lo"], b["lo"])
+                cur["t"] = min(cur["t"], b["t"])
+                cur["n"] += 1
+                if b["status"] == "angetestet":
+                    cur["status"] = "angetestet"
+            else:
+                if cur is not None:
+                    result.append(cur)
+                cur = dict(b)
+                cur["n"] = 1
+        if cur is not None:
+            result.append(cur)
+    for b in blocks:
+        if b["status"] == "ungueltig":
+            x = dict(b)
+            x["n"] = 1
+            result.append(x)
     return result
 
 
@@ -163,13 +207,15 @@ def find_entries(m5, m1, blocks):
 def main():
     h = login()
     m1 = get_candles(h, "MINUTE").iloc[:-1].reset_index(drop=True)
+    dfs = {n: get_candles(h, r) for n, r in FRAMES.items()}
+    trend = get_trend(dfs["H1"].iloc[:-1].reset_index(drop=True))
     out = {
         "updated": datetime.now(timezone.utc).isoformat(),
+        "trend": trend,
         "frames": {},
         "entries": [],
     }
-    for name, res in FRAMES.items():
-        df = get_candles(h, res)
+    for name, df in dfs.items():
         blocks = find_blocks(df)
         shown = df.iloc[-SHOW:]
         first_t = int(shown.iloc[0].time.timestamp())
@@ -177,6 +223,8 @@ def main():
             closed = df.iloc[:-1].reset_index(drop=True)
             ents = find_entries(closed, m1, blocks)
             out["entries"] = [e for e in ents if e["t"] >= first_t]
+        visible = [b for b in blocks if b["t"] >= first_t]
+        merged = merge(visible, GAP[name])
         clean = [
             {
                 "kind": b["kind"],
@@ -184,9 +232,10 @@ def main():
                 "hi": round(b["hi"], 2),
                 "t": b["t"],
                 "status": b["status"],
+                "n": b["n"],
+                "with": trend == "neutral" or b["kind"] == trend,
             }
-            for b in blocks
-            if b["t"] >= first_t
+            for b in merged
         ]
         candles = [
             {
