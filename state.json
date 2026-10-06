@@ -258,6 +258,30 @@
    "f_touch": false,
    "f_confirm": false,
    "f_invalid": true
+  },
+  "long_20261005T1440": {
+   "type": "long",
+   "lo": 4132.79,
+   "hi": 4138.095,
+   "formed": "2026-10-05T14:40:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261005T2320": {
+   "type": "long",
+   "lo": 4138.424999999999,
+   "hi": 4139.6,
+   "formed": "2026-10-05T23:20:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
   }
  }
 }
