@@ -1,17 +1,5 @@
 {
  "zones": {
-  "short_20261005T1100": {
-   "type": "short",
-   "lo": 4160.555,
-   "hi": 4165.27,
-   "formed": "2026-10-05T11:00:00+00:00",
-   "status": "invalid",
-   "alerted": false,
-   "f_new": true,
-   "f_touch": false,
-   "f_confirm": false,
-   "f_invalid": true
-  },
   "short_20261005T1505": {
    "type": "short",
    "lo": 4143.69,
@@ -268,6 +256,67 @@
    "f_touch": false,
    "f_confirm": false,
    "f_invalid": true
+  },
+  "long_20261006T0015": {
+   "type": "long",
+   "lo": 4133.61,
+   "hi": 4136.5,
+   "formed": "2026-10-06T00:15:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "short_20261006T0035": {
+   "type": "short",
+   "lo": 4139.12,
+   "hi": 4143.39,
+   "formed": "2026-10-06T00:35:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261006T0250": {
+   "type": "long",
+   "lo": 4112.275,
+   "hi": 4124.715,
+   "formed": "2026-10-06T02:50:00+00:00",
+   "status": "active",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": true,
+   "f_confirm": true,
+   "f_invalid": false,
+   "touch_time": "2026-10-06T03:35:00+00:00"
+  },
+  "short_20261006T0910": {
+   "type": "short",
+   "lo": 4152.285,
+   "hi": 4156.3,
+   "formed": "2026-10-06T09:10:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261006T1025": {
+   "type": "long",
+   "lo": 4149.865,
+   "hi": 4152.595,
+   "formed": "2026-10-06T10:25:00+00:00",
+   "status": "active",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": false
   }
  }
 }
