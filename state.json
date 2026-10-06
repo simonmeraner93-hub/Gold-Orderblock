@@ -29,12 +29,12 @@
    "lo": 4124.595,
    "hi": 4133.41,
    "formed": "2026-10-05T04:40:00+00:00",
-   "status": "active",
+   "status": "invalid",
    "alerted": false,
    "f_new": true,
    "f_touch": true,
    "f_confirm": true,
-   "f_invalid": false,
+   "f_invalid": true,
    "touch_time": "2026-10-05T04:45:00+00:00"
   },
   "long_20261005T0540": {
@@ -111,18 +111,6 @@
    "f_confirm": true,
    "f_invalid": true,
    "touch_time": "2026-10-05T07:00:00+00:00"
-  },
-  "short_20261005T0230": {
-   "type": "short",
-   "lo": 4155.825,
-   "hi": 4161.18,
-   "formed": "2026-10-05T02:30:00+00:00",
-   "status": "invalid",
-   "alerted": false,
-   "f_new": true,
-   "f_touch": false,
-   "f_confirm": false,
-   "f_invalid": true
   },
   "short_20261005T1100": {
    "type": "short",
