@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import requests
 import pandas as pd
 
@@ -10,6 +10,7 @@ FRAMES = {"M5": "MINUTE_5", "M15": "MINUTE_15", "H1": "HOUR"}
 STRONG = 1.5
 SWING = 10
 SHOW = 120
+STOP_PUFFER = 0.5
 
 
 def login():
@@ -47,8 +48,7 @@ def get_candles(h, resolution):
             "low": mid("lowPrice"),
             "close": mid("closePrice"),
         })
-    df = pd.DataFrame(rows).sort_values("time").reset_index(drop=True)
-    return df
+    return pd.DataFrame(rows).sort_values("time").reset_index(drop=True)
 
 
 def find_blocks(df):
@@ -79,8 +79,8 @@ def find_blocks(df):
 
     result = []
     for k, (kind, i) in found.items():
-        lo = df.iloc[k].low
-        hi = df.iloc[k].high
+        lo = float(df.iloc[k].low)
+        hi = float(df.iloc[k].high)
         status = "frisch"
         for j in range(i + 1, len(df)):
             c = df.iloc[j]
@@ -97,27 +97,97 @@ def find_blocks(df):
                 if c.high >= lo:
                     status = "angetestet"
         result.append({
-            "kind": kind,
-            "lo": round(float(lo), 2),
-            "hi": round(float(hi), 2),
-            "t": int(df.iloc[k].time.timestamp()),
-            "status": status,
+            "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
+            "t": int(df.iloc[k].time.timestamp()), "status": status,
         })
     return result
 
 
+def find_entries(m5, m1, blocks):
+    entries = []
+    for b in blocks:
+        i = b["i"]
+        lo, hi = b["lo"], b["hi"]
+        is_long = b["kind"] == "long"
+        touched = False
+        invalid = False
+        for j in range(i + 1, len(m5)):
+            c = m5.iloc[j]
+            inv = (c.close < lo) if is_long else (c.close > hi)
+            tch = (c.low <= hi) if is_long else (c.high >= lo)
+            if inv:
+                invalid = True
+                break
+            if tch:
+                touched = True
+                break
+        if invalid or not touched:
+            continue
+
+        start = m5.iloc[i].time + timedelta(minutes=5)
+        m = m1[m1.time >= start].reset_index(drop=True)
+        if len(m) < 10:
+            continue
+        t = None
+        for idx in range(len(m)):
+            c = m.iloc[idx]
+            hit = (c.low <= hi) if is_long else (c.high >= lo)
+            if hit:
+                t = idx
+                break
+        if t is None:
+            continue
+
+        w = m.iloc[max(t - 5, 0):t + 1]
+        ref = w.high.max() if is_long else w.low.min()
+        for idx in range(t + 1, min(t + 61, len(m))):
+            c = m.iloc[idx]
+            broke = (c.close < lo) if is_long else (c.close > hi)
+            if broke:
+                break
+            choch = (c.close > ref) if is_long else (c.close < ref)
+            if choch:
+                stop = lo - STOP_PUFFER if is_long else hi + STOP_PUFFER
+                entries.append({
+                    "kind": b["kind"],
+                    "t": int(c.time.timestamp()),
+                    "price": round(float(c.close), 2),
+                    "stop": round(float(stop), 2),
+                    "lo": round(lo, 2),
+                    "hi": round(hi, 2),
+                })
+                break
+    return entries
+
+
 def main():
     h = login()
+    m1 = get_candles(h, "MINUTE").iloc[:-1].reset_index(drop=True)
     out = {
         "updated": datetime.now(timezone.utc).isoformat(),
         "frames": {},
+        "entries": [],
     }
     for name, res in FRAMES.items():
         df = get_candles(h, res)
         blocks = find_blocks(df)
         shown = df.iloc[-SHOW:]
         first_t = int(shown.iloc[0].time.timestamp())
-        blocks = [b for b in blocks if b["t"] >= first_t]
+        if name == "M5":
+            closed = df.iloc[:-1].reset_index(drop=True)
+            ents = find_entries(closed, m1, blocks)
+            out["entries"] = [e for e in ents if e["t"] >= first_t]
+        clean = [
+            {
+                "kind": b["kind"],
+                "lo": round(b["lo"], 2),
+                "hi": round(b["hi"], 2),
+                "t": b["t"],
+                "status": b["status"],
+            }
+            for b in blocks
+            if b["t"] >= first_t
+        ]
         candles = [
             {
                 "t": int(r.time.timestamp()),
@@ -128,7 +198,7 @@ def main():
             }
             for r in shown.itertuples()
         ]
-        out["frames"][name] = {"candles": candles, "blocks": blocks}
+        out["frames"][name] = {"candles": candles, "blocks": clean}
 
     os.makedirs("docs", exist_ok=True)
     with open("docs/data.json", "w") as f:
