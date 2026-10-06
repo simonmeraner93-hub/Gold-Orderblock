@@ -341,6 +341,18 @@
    "f_touch": false,
    "f_confirm": false,
    "f_invalid": false
+  },
+  "long_20261006T0045": {
+   "type": "long",
+   "lo": 4136.07,
+   "hi": 4142.68,
+   "formed": "2026-10-06T00:45:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
   }
  }
 }
