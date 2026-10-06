@@ -1,334 +1,217 @@
-"""
-Gold Orderblock Bot (capital.com Demo + Telegram)
-- Findet Orderblöcke im M5-Chart
-- Meldet: neue Zone, erste Berührung, CHoCH-Bestätigung (M1), Zone ungültig
-- Speichert den Zustand in state.json (verhindert Doppelmeldungen)
-"""
 import os
 import json
 from datetime import datetime, timedelta, timezone
-
 import requests
+import pandas as pd
 
-# ---------------- EINSTELLUNGEN ----------------
+BASE = "https://demo-api-capital.backend-capital.com/api/v1"
 EPIC = "GOLD"
-BASE_URL = "https://demo-api-capital.backend-capital.com/api/v1"
-STATE_FILE = "state.json"
+WINDOW_MIN = 20
+STRONG = 1.5
+SWING = 10
+STOP_PUFFER = 0.5
+STATE_FILE = "sent.json"
 
-# Schalter für Alarmarten (True = an, False = aus)
-ALERT_NEW_ZONE = True
-ALERT_TOUCH = True
-ALERT_CONFIRM = True
-ALERT_INVALID = True
-
-TREND_FILTER = True        # nur Zonen in Richtung des M5-Trends (Kurs über/unter EMA50)
-EMA_PERIOD = 50
-ATR_PERIOD = 14
-IMPULSE_ATR = 1.2          # wie stark muss die Bewegung nach dem Orderblock sein
-LOOKBACK_CANDLES = 150     # so weit zurück sucht der Bot Zonen (M5-Kerzen)
-RECENT_MINUTES = 20        # "neue Zone" nur melden, wenn sie so frisch ist
-EVENT_MAX_AGE_MIN = 30     # ältere Ereignisse werden nicht mehr gemeldet
-CONFIRM_WINDOW_MIN = 60    # so lange nach Berührung wird auf CHoCH gewartet
-STOP_BUFFER = 0.5          # Stop-Vorschlag: so viele Dollar hinter der Zone
-# -----------------------------------------------
-
-UTC = timezone.utc
+TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+CHAT = os.environ["TELEGRAM_CHAT_ID"]
 
 
-def log(msg):
-    print(msg, flush=True)
+def tg(text):
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        data={"chat_id": CHAT, "text": text},
+        timeout=15,
+    )
 
 
-# ---------- capital.com ----------
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(s):
+    cut = datetime.now(timezone.utc).timestamp() - 3 * 86400
+    s = {k: v for k, v in s.items() if v >= cut}
+    with open(STATE_FILE, "w") as f:
+        json.dump(s, f)
+
+
 def login():
     r = requests.post(
-        f"{BASE_URL}/session",
+        f"{BASE}/session",
         headers={"X-CAP-API-KEY": os.environ["CAPITAL_API_KEY"]},
         json={
             "identifier": os.environ["CAPITAL_IDENTIFIER"],
             "password": os.environ["CAPITAL_PASSWORD"],
-            "encryptedPassword": False,
         },
-        timeout=20,
+        timeout=15,
     )
     r.raise_for_status()
     return {
-        "X-SECURITY-TOKEN": r.headers["X-SECURITY-TOKEN"],
         "CST": r.headers["CST"],
+        "X-SECURITY-TOKEN": r.headers["X-SECURITY-TOKEN"],
     }
 
 
-def get_candles(headers, resolution, count):
+def get_candles(h, resolution):
     r = requests.get(
-        f"{BASE_URL}/prices/{EPIC}",
-        headers=headers,
-        params={"resolution": resolution, "max": count},
-        timeout=20,
+        f"{BASE}/prices/{EPIC}",
+        headers=h,
+        params={"resolution": resolution, "max": 300},
+        timeout=15,
     )
     r.raise_for_status()
-    out = []
+    rows = []
     for p in r.json()["prices"]:
-        def mid(key):
-            return (p[key]["bid"] + p[key]["ask"]) / 2
-        t = datetime.fromisoformat(p["snapshotTimeUTC"]).replace(tzinfo=UTC)
-        out.append({
-            "t": t,
-            "o": mid("openPrice"),
-            "h": mid("highPrice"),
-            "l": mid("lowPrice"),
-            "c": mid("closePrice"),
+        mid = lambda k: (p[k]["bid"] + p[k]["ask"]) / 2
+        rows.append({
+            "time": pd.to_datetime(p["snapshotTimeUTC"]).tz_localize("UTC"),
+            "open": mid("openPrice"),
+            "high": mid("highPrice"),
+            "low": mid("lowPrice"),
+            "close": mid("closePrice"),
         })
-    out.sort(key=lambda x: x["t"])
-    return out[:-1]  # letzte (noch laufende) Kerze weglassen
+    df = pd.DataFrame(rows).sort_values("time").reset_index(drop=True)
+    return df.iloc[:-1].reset_index(drop=True)
 
 
-# ---------- Indikatoren ----------
-def ema(values, period):
-    k = 2 / (period + 1)
-    e = values[0]
-    for v in values[1:]:
-        e = v * k + e * (1 - k)
-    return e
-
-
-def atr_at(candles, i, period=ATR_PERIOD):
-    start = max(1, i - period + 1)
-    trs = []
-    for j in range(start, i + 1):
-        c, prev = candles[j], candles[j - 1]
-        trs.append(max(c["h"] - c["l"], abs(c["h"] - prev["c"]), abs(c["l"] - prev["c"])))
-    return sum(trs) / len(trs) if trs else 0
-
-
-# ---------- Orderblock-Erkennung (M5) ----------
-def detect_zones(m5):
-    n = len(m5)
-    first = max(ATR_PERIOD + 1, n - LOOKBACK_CANDLES)
-    found = []
-    for i in range(first, n - 1):
-        c = m5[i]
-        atr = atr_at(m5, i)
-        if atr <= 0:
+def find_blocks(df):
+    blocks = []
+    body = (df["close"] - df["open"]).abs()
+    for i in range(SWING + 20, len(df)):
+        avg = body.iloc[i - 20:i].mean()
+        c = df.iloc[i]
+        prev = df.iloc[i - SWING:i]
+        if body.iloc[i] < STRONG * avg:
             continue
-        # Long-Orderblock: letzte rote Kerze vor starkem Aufwärtsimpuls
-        if c["c"] < c["o"]:
-            for j in range(i + 1, min(i + 4, n)):
-                if m5[j]["c"] <= m5[j]["o"]:
+        if c.close > c.open and c.close > prev.high.max():
+            for k in range(i - 1, max(i - 6, 0), -1):
+                if df.iloc[k].close < df.iloc[k].open:
+                    blocks.append(("long", k, i))
                     break
-                if m5[j]["c"] > c["h"]:
-                    if m5[j]["c"] - c["l"] >= IMPULSE_ATR * atr:
-                        found.append({"type": "long", "lo": c["l"], "hi": c["h"],
-                                      "formed": m5[j]["t"]})
+        elif c.close < c.open and c.close < prev.low.min():
+            for k in range(i - 1, max(i - 6, 0), -1):
+                if df.iloc[k].close > df.iloc[k].open:
+                    blocks.append(("short", k, i))
                     break
-        # Short-Orderblock: letzte grüne Kerze vor starkem Abwärtsimpuls
-        if c["c"] > c["o"]:
-            for j in range(i + 1, min(i + 4, n)):
-                if m5[j]["c"] >= m5[j]["o"]:
-                    break
-                if m5[j]["c"] < c["l"]:
-                    if c["h"] - m5[j]["c"] >= IMPULSE_ATR * atr:
-                        found.append({"type": "short", "lo": c["l"], "hi": c["h"],
-                                      "formed": m5[j]["t"]})
-                    break
-    # Überlappende Zonen gleicher Richtung zusammenfassen (weniger Rauschen)
-    accepted = []
-    for z in found:
-        dup = any(a["type"] == z["type"] and z["lo"] <= a["hi"] and z["hi"] >= a["lo"]
-                  for a in accepted)
-        if not dup:
-            accepted.append(z)
-    return accepted
+    return blocks
 
 
-# ---------- CHoCH-Bestätigung (M1) ----------
-def find_choch(is_long, z, touch_time, m1):
-    pre = [c for c in m1 if touch_time - timedelta(minutes=10) <= c["t"] < touch_time]
-    after = [c for c in m1 if c["t"] >= touch_time]
-    if not after:
-        return None
-    window = list(pre)
-    extreme = None
-    ref = None
-    for c in after:
-        window.append(c)
-        if is_long:
-            if extreme is None or c["l"] < extreme:
-                extreme = c["l"]
-                ref = max(x["h"] for x in window)  # letztes kleines Hoch
-            elif extreme <= z["hi"] and c["c"] > ref and c["c"] >= z["lo"]:
-                return c["t"]
-        else:
-            if extreme is None or c["h"] > extreme:
-                extreme = c["h"]
-                ref = min(x["l"] for x in window)  # letztes kleines Tief
-            elif extreme >= z["lo"] and c["c"] < ref and c["c"] <= z["hi"]:
-                return c["t"]
-    return None
-
-
-# ---------- Telegram ----------
-def send_telegram(text):
-    r = requests.post(
-        f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
-        json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text},
-        timeout=20,
-    )
-    if not r.ok:
-        log(f"Telegram-Fehler: {r.status_code} {r.text}")
-
-
-# ---------- Zustand ----------
-def load_state():
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"zones": {}}
-
-
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=1)
-
-
-def fmt(x):
-    return f"{x:.2f}"
-
-
-def zone_text(z):
-    return f"Zone: {fmt(z['lo'])} - {fmt(z['hi'])}"
-
-
-def stop_text(z):
-    if z["type"] == "long":
-        return f"Stop-Vorschlag: unter {fmt(z['lo'] - STOP_BUFFER)}"
-    return f"Stop-Vorschlag: über {fmt(z['hi'] + STOP_BUFFER)}"
-
-
-# ---------- Hauptlogik ----------
 def main():
-    now = datetime.now(UTC)
-    headers = login()
-    m5 = get_candles(headers, "MINUTE_5", 300)
-    m1 = get_candles(headers, "MINUTE", 200)
-    if len(m5) < EMA_PERIOD + 5 or not m1:
-        log("Zu wenige Kursdaten.")
-        return
-
-    price = m1[-1]["c"]
-    trend_ema = ema([c["c"] for c in m5], EMA_PERIOD)
-    trend = "long" if m5[-1]["c"] > trend_ema else "short"
-    log(f"Kurs {fmt(price)} | EMA{EMA_PERIOD} {fmt(trend_ema)} | Trend: {trend}")
-
-    def trend_ok(z):
-        return (not TREND_FILTER) or z["type"] == trend
-
-    def is_recent(event_time, minutes=EVENT_MAX_AGE_MIN):
-        return now - event_time <= timedelta(minutes=minutes)
-
+    now = datetime.now(timezone.utc)
     state = load_state()
-    zones = state["zones"]
+    if now.weekday() >= 5:
+        save_state(state)
+        return
+    cutoff = now - timedelta(minutes=WINDOW_MIN)
 
-    # Neue Zonen in den Zustand aufnehmen
-    for d in detect_zones(m5):
-        zid = f"{d['type']}_{d['formed'].strftime('%Y%m%dT%H%M')}"
-        overlap = any(z["type"] == d["type"] and d["lo"] <= z["hi"] and d["hi"] >= z["lo"]
-                      and z.get("status") != "invalid" for z in zones.values())
-        if zid in zones or overlap:
+    h = login()
+    m5 = get_candles(h, "MINUTE_5")
+    m1 = get_candles(h, "MINUTE")
+
+    def notify(key, text):
+        if key in state:
+            return
+        tg(text)
+        state[key] = now.timestamp()
+
+    def c5(i):
+        return m5.iloc[i].time + timedelta(minutes=5)
+
+    seen = set()
+    for kind, k, i in find_blocks(m5):
+        bt = int(m5.iloc[k].time.timestamp())
+        if (kind, bt) in seen:
             continue
-        zones[zid] = {
-            "type": d["type"], "lo": d["lo"], "hi": d["hi"],
-            "formed": d["formed"].isoformat(),
-            "status": "active", "alerted": False,
-            "f_new": False, "f_touch": False, "f_confirm": False, "f_invalid": False,
-        }
+        seen.add((kind, bt))
 
-    messages = []
+        lo, hi = m5.iloc[k].low, m5.iloc[k].high
+        zone = f"{lo:.2f} - {hi:.2f}"
+        is_long = kind == "long"
+        name = "Long" if is_long else "Short"
+        icon = "🟢" if is_long else "🔴"
 
-    for zid, z in zones.items():
-        if z["status"] == "invalid":
+        if c5(i) >= cutoff:
+            notify(f"{kind}-{bt}-new",
+                   f"{icon} Neuer {name}-Orderblock (M5)\nZone: {zone}")
+
+        touched = False
+        invalid = False
+        for j in range(i + 1, len(m5)):
+            c = m5.iloc[j]
+            inv = (c.close < lo) if is_long else (c.close > hi)
+            tch = (c.low <= hi) if is_long else (c.high >= lo)
+            if inv:
+                invalid = True
+                if c5(j) >= cutoff:
+                    notify(f"{kind}-{bt}-invalid",
+                           f"❌ {name}-Orderblock ungültig\nZone: {zone}")
+                break
+            if tch and not touched:
+                touched = True
+                if c5(j) >= cutoff:
+                    notify(f"{kind}-{bt}-touch",
+                           f"⚡ {name}-Orderblock zum ersten Mal angetestet\nZone: {zone}")
+
+        if invalid or not touched:
             continue
-        is_long = z["type"] == "long"
-        formed = datetime.fromisoformat(z["formed"])
-        arrow = "🟢" if is_long else "🔴"
-        side = "Long" if is_long else "Short"
 
-        # Meldung: neue Zone
-        if not z["f_new"]:
-            z["f_new"] = True
-            if (ALERT_NEW_ZONE and trend_ok(z)
-                    and is_recent(formed, RECENT_MINUTES)):
-                messages.append(f"{arrow} Neuer {side}-Orderblock (M5)\n{zone_text(z)}")
-                z["alerted"] = True
+        m = m1[m1.time >= c5(i)].reset_index(drop=True)
+        if len(m) < 10:
+            continue
 
-        # M5-Kerzen seit der Entstehung durchgehen
-        touch_time = None
-        invalid_time = None
-        for c in m5:
-            if c["t"] <= formed:
+        t = None
+        for idx in range(len(m)):
+            c = m.iloc[idx]
+            hit = (c.low <= hi) if is_long else (c.high >= lo)
+            if hit:
+                t = idx
+                break
+        if t is None:
+            continue
+
+        w = m.iloc[max(t - 5, 0):t + 1]
+        ref = w.high.max() if is_long else w.low.min()
+
+        for idx in range(t + 1, min(t + 61, len(m))):
+            c = m.iloc[idx]
+            broke = (c.close < lo) if is_long else (c.close > hi)
+            if broke:
+                break
+            choch = (c.close > ref) if is_long else (c.close < ref)
+            if not choch:
                 continue
-            if is_long:
-                if c["c"] < z["lo"]:
-                    invalid_time = c["t"]
-                    break
-                if touch_time is None and c["l"] <= z["hi"]:
-                    touch_time = c["t"]
-            else:
-                if c["c"] > z["hi"]:
-                    invalid_time = c["t"]
-                    break
-                if touch_time is None and c["h"] >= z["lo"]:
-                    touch_time = c["t"]
-
-        # Meldung: Zone ungültig
-        if invalid_time is not None:
-            z["status"] = "invalid"
-            if (ALERT_INVALID and z["alerted"] and not z["f_invalid"]
-                    and is_recent(invalid_time + timedelta(minutes=5))):
-                messages.append(f"❌ {side}-Orderblock ungültig\n{zone_text(z)}")
-            z["f_invalid"] = True
-            continue
-
-        # Meldung: erste Berührung
-        if touch_time is not None and not z["f_touch"]:
-            z["f_touch"] = True
-            if (ALERT_TOUCH and trend_ok(z)
-                    and is_recent(touch_time + timedelta(minutes=5))):
-                messages.append(
-                    f"⚡ {side}-Orderblock zum ersten Mal angetestet\n{zone_text(z)}\n"
-                    f"Kurs: {fmt(price)}\nNoch keine Bestätigung - warte auf CHoCH."
-                )
-                z["alerted"] = True
-            z["touch_time"] = touch_time.isoformat()
-
-        # Meldung: CHoCH-Bestätigung
-        if z["f_touch"] and not z["f_confirm"] and "touch_time" in z:
-            tt = datetime.fromisoformat(z["touch_time"])
-            if now - tt > timedelta(minutes=CONFIRM_WINDOW_MIN):
-                z["f_confirm"] = True  # abgelaufen, nicht mehr warten
-            else:
-                choch = find_choch(is_long, z, tt, m1)
-                if choch is not None:
-                    z["f_confirm"] = True
-                    if ALERT_CONFIRM and trend_ok(z) and is_recent(choch):
-                        messages.append(
-                            f"✅ {side}-Bestätigung (CHoCH im M1)\n{zone_text(z)}\n"
-                            f"Kurs: {fmt(price)}\n{stop_text(z)}"
-                        )
-                        z["alerted"] = True
-
-    # Alte Zonen (älter als 24h) aus dem Zustand entfernen
-    for zid in list(zones.keys()):
-        if now - datetime.fromisoformat(zones[zid]["formed"]) > timedelta(hours=24):
-            del zones[zid]
-
-    for m in messages:
-        log(m)
-        send_telegram(m)
+            close_t = c.time + timedelta(minutes=1)
+            if close_t >= cutoff:
+                entry = c.close
+                stop = lo - STOP_PUFFER if is_long else hi + STOP_PUFFER
+                risk = abs(entry - stop)
+                if risk > 0:
+                    if is_long:
+                        target = m5.high.iloc[-60:].max()
+                        reward = target - entry
+                    else:
+                        target = m5.low.iloc[-60:].min()
+                        reward = entry - target
+                    if reward >= risk * 0.5:
+                        tline = f"Ziel: {target:.2f} (CRV 1:{reward / risk:.1f})"
+                    else:
+                        tline = "Ziel: offen"
+                    notify(
+                        f"{kind}-{bt}-entry",
+                        f"🚀 {name}-Einstieg bestätigt (M1-CHoCH)\n"
+                        f"Zone: {zone}\n"
+                        f"Einstieg ca.: {entry:.2f}\n"
+                        f"Stop: {stop:.2f} (Risiko {risk:.1f} Punkte)\n"
+                        f"{tline}\n"
+                        f"Erst im Demokonto testen, kein Finanzrat.",
+                    )
+            break
 
     save_state(state)
-    log(f"Fertig. {len(messages)} Meldung(en) gesendet.")
 
 
-if __name__ == "__main__":
-    main()
+main()
