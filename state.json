@@ -359,13 +359,39 @@
    "lo": 4171.945,
    "hi": 4174.76,
    "formed": "2026-10-06T12:00:00+00:00",
-   "status": "active",
+   "status": "invalid",
    "alerted": true,
    "f_new": true,
    "f_touch": true,
    "f_confirm": false,
-   "f_invalid": false,
+   "f_invalid": true,
    "touch_time": "2026-10-06T12:15:00+00:00"
+  },
+  "long_20261006T0710": {
+   "type": "long",
+   "lo": 4129.1900000000005,
+   "hi": 4134.41,
+   "formed": "2026-10-06T07:10:00+00:00",
+   "status": "active",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": true,
+   "f_confirm": true,
+   "f_invalid": false,
+   "touch_time": "2026-10-06T07:30:00+00:00"
+  },
+  "short_20261006T1230": {
+   "type": "short",
+   "lo": 4174.73,
+   "hi": 4179.4400000000005,
+   "formed": "2026-10-06T12:30:00+00:00",
+   "status": "active",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": true,
+   "f_confirm": false,
+   "f_invalid": false,
+   "touch_time": "2026-10-06T12:35:00+00:00"
   }
  }
 }
