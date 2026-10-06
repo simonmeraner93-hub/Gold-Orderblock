@@ -1,18 +1,5 @@
 {
  "zones": {
-  "long_20261005T0440": {
-   "type": "long",
-   "lo": 4124.595,
-   "hi": 4133.41,
-   "formed": "2026-10-05T04:40:00+00:00",
-   "status": "invalid",
-   "alerted": false,
-   "f_new": true,
-   "f_touch": true,
-   "f_confirm": true,
-   "f_invalid": true,
-   "touch_time": "2026-10-05T04:45:00+00:00"
-  },
   "long_20261005T0540": {
    "type": "long",
    "lo": 4133.42,
@@ -252,6 +239,18 @@
    "lo": 4138.424999999999,
    "hi": 4139.6,
    "formed": "2026-10-05T23:20:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "short_20261005T2245": {
+   "type": "short",
+   "lo": 4143.85,
+   "hi": 4144.54,
+   "formed": "2026-10-05T22:45:00+00:00",
    "status": "invalid",
    "alerted": false,
    "f_new": true,
