@@ -38,19 +38,6 @@
    "f_confirm": false,
    "f_invalid": true
   },
-  "long_20261005T0655": {
-   "type": "long",
-   "lo": 4148.7,
-   "hi": 4152.75,
-   "formed": "2026-10-05T06:55:00+00:00",
-   "status": "invalid",
-   "alerted": false,
-   "f_new": true,
-   "f_touch": true,
-   "f_confirm": true,
-   "f_invalid": true,
-   "touch_time": "2026-10-05T07:00:00+00:00"
-  },
   "short_20261005T1100": {
    "type": "short",
    "lo": 4160.555,
@@ -264,6 +251,30 @@
    "lo": 4136.86,
    "hi": 4140.46,
    "formed": "2026-10-05T18:10:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261005T1740": {
+   "type": "long",
+   "lo": 4128.2,
+   "hi": 4130.98,
+   "formed": "2026-10-05T17:40:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261006T0340": {
+   "type": "long",
+   "lo": 4124.425,
+   "hi": 4127.92,
+   "formed": "2026-10-06T03:40:00+00:00",
    "status": "invalid",
    "alerted": false,
    "f_new": true,
