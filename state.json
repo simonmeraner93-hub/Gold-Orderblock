@@ -1,17 +1,5 @@
 {
  "zones": {
-  "short_20261005T0245": {
-   "type": "short",
-   "lo": 4153.15,
-   "hi": 4155.75,
-   "formed": "2026-10-05T02:45:00+00:00",
-   "status": "invalid",
-   "alerted": false,
-   "f_new": true,
-   "f_touch": false,
-   "f_confirm": false,
-   "f_invalid": true
-  },
   "short_20261005T0410": {
    "type": "short",
    "lo": 4138.62,
@@ -218,6 +206,30 @@
    "formed": "2026-10-06T01:15:00+00:00",
    "status": "active",
    "alerted": true,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": false
+  },
+  "long_20261005T1720": {
+   "type": "long",
+   "lo": 4126.1,
+   "hi": 4130.55,
+   "formed": "2026-10-05T17:20:00+00:00",
+   "status": "invalid",
+   "alerted": false,
+   "f_new": true,
+   "f_touch": false,
+   "f_confirm": false,
+   "f_invalid": true
+  },
+  "long_20261006T0245": {
+   "type": "long",
+   "lo": 4120.67,
+   "hi": 4123.315,
+   "formed": "2026-10-06T02:45:00+00:00",
+   "status": "active",
+   "alerted": false,
    "f_new": true,
    "f_touch": false,
    "f_confirm": false,
