@@ -1,17 +1,5 @@
 {
  "zones": {
-  "short_20261005T0410": {
-   "type": "short",
-   "lo": 4138.62,
-   "hi": 4141.32,
-   "formed": "2026-10-05T04:10:00+00:00",
-   "status": "invalid",
-   "alerted": false,
-   "f_new": true,
-   "f_touch": false,
-   "f_confirm": false,
-   "f_invalid": true
-  },
   "long_20261005T0440": {
    "type": "long",
    "lo": 4124.595,
