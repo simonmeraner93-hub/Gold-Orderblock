@@ -28,6 +28,11 @@ label{display:block;padding:4px 14px;font-size:14px;color:#8b93a5}
 .z.ag{opacity:.55}
 .z small{color:#8b93a5;display:block}
 .st{font-size:13px;align-self:center;text-align:right}
+.z.h.win{border-color:#22c55e}
+.z.h.loss{border-color:#ef4444}
+.z.h.open{border-color:#facc15}
+.z.h.unk{border-color:#6b7280}
+.z.h small b{color:#e6e9ef}
 </style>
 </head>
 <body>
@@ -51,6 +56,10 @@ label{display:block;padding:4px 14px;font-size:14px;color:#8b93a5}
 <div class="list">
 <h2>Einstiege</h2>
 <div id="ent"></div>
+<h2>Auswertung (Ziel 1:1)</h2>
+<div id="stat"></div>
+<h2>Signale mit Ergebnis</h2>
+<div id="hist"></div>
 <h2>Zonen</h2>
 <div id="list"></div>
 </div>
@@ -246,6 +255,37 @@ function list(){
     ' · Zone '+e.lo.toFixed(2)+' - '+e.hi.toFixed(2)+'</small></div>'+
     '<div class="st">Stop<br>'+e.stop.toFixed(2)+'</div></div>'
   ).join("")||"<p>Noch keine Einstiege</p>";
+
+  const hs=DATA.history||[];
+  const w=hs.filter(h=>h.res==="Ziel").length;
+  const l=hs.filter(h=>h.res==="Stop").length;
+  const o=hs.length-w-l;
+  const rate=(a,b)=>(a+b)?Math.round(100*a/(a+b))+" %":"-";
+  const net=w-l;
+  const tw=hs.filter(h=>h.fit===true&&h.res==="Ziel").length;
+  const tl=hs.filter(h=>h.fit===true&&h.res==="Stop").length;
+  const aw=hs.filter(h=>h.fit===false&&h.res==="Ziel").length;
+  const al=hs.filter(h=>h.fit===false&&h.res==="Stop").length;
+  let extra="";
+  if(tw+tl+aw+al>0){
+    extra='<br>Mit H1-Trend: '+tw+' Ziel / '+tl+' Stop ('+rate(tw,tl)+')'+
+      '<br>Gegen den Trend: '+aw+' Ziel / '+al+' Stop ('+rate(aw,al)+')';
+  }
+  document.getElementById("stat").innerHTML=hs.length?
+    '<div class="z"><div><b>'+w+' Ziel · '+l+' Stop · '+o+' offen oder unklar</b>'+
+    '<small>Trefferquote '+rate(w,l)+' · Ergebnis '+(net>=0?'+':'')+net+' R (1 R = dein Risiko, ohne Spanne und Kosten)'+extra+'</small></div></div>':
+    "<p>Noch keine Signale</p>";
+
+  const RL={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
+  const RC={Ziel:"win",Stop:"loss",offen:"open",unklar:"unk"};
+  document.getElementById("hist").innerHTML=hs.slice(0,30).map(h=>
+    '<div class="z h '+RC[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
+    '</b> Einstieg '+h.price.toFixed(2)+
+    '<small>Stop '+h.stop.toFixed(2)+' · Ziel 1:1 '+h.target.toFixed(2)+'<br>'+
+    new Date(h.t*1000).toLocaleString("de-DE")+
+    (h.rt?' → '+new Date(h.rt*1000).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}):'')+
+    '</small></div><div class="st"><b>'+RL[h.res]+'</b></div></div>'
+  ).join("")||"<p>Noch keine Signale</p>";
 }
 
 function render(){draw();list();info();}
