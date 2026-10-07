@@ -131,3 +131,240 @@ def find_blocks(df):
                     status = "ungueltig"
                     break
                 if c.low <= hi:
+                    status = "angetestet"
+            else:
+                if c.close > hi:
+                    status = "ungueltig"
+                    break
+                if c.high >= lo:
+                    status = "angetestet"
+        result.append({
+            "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
+            "t": int(df.iloc[k].time.timestamp()), "status": status,
+        })
+    return result
+
+
+def merge(blocks, gap):
+    result = []
+    for kind in ("long", "short"):
+        grp = sorted(
+            [b for b in blocks if b["kind"] == kind and b["status"] != "ungueltig"],
+            key=lambda b: b["lo"],
+        )
+        cur = None
+        for b in grp:
+            if cur is not None and b["lo"] <= cur["hi"] + gap:
+                cur["hi"] = max(cur["hi"], b["hi"])
+                cur["lo"] = min(cur["lo"], b["lo"])
+                cur["t"] = min(cur["t"], b["t"])
+                cur["n"] += 1
+                if b["status"] == "angetestet":
+                    cur["status"] = "angetestet"
+            else:
+                if cur is not None:
+                    result.append(cur)
+                cur = dict(b)
+                cur["n"] = 1
+        if cur is not None:
+            result.append(cur)
+    for b in blocks:
+        if b["status"] == "ungueltig":
+            x = dict(b)
+            x["n"] = 1
+            result.append(x)
+    return result
+
+
+def find_entries(m5, m1, blocks):
+    entries = []
+    for b in blocks:
+        i = b["i"]
+        lo, hi = b["lo"], b["hi"]
+        is_long = b["kind"] == "long"
+        touched = False
+        invalid = False
+        for j in range(i + 1, len(m5)):
+            c = m5.iloc[j]
+            inv = (c.close < lo) if is_long else (c.close > hi)
+            tch = (c.low <= hi) if is_long else (c.high >= lo)
+            if inv:
+                invalid = True
+                break
+            if tch:
+                touched = True
+                break
+        if invalid or not touched:
+            continue
+
+        start = m5.iloc[i].time + timedelta(minutes=5)
+        m = m1[m1.time >= start].reset_index(drop=True)
+        if len(m) < 10:
+            continue
+        t = None
+        for idx in range(len(m)):
+            c = m.iloc[idx]
+            hit = (c.low <= hi) if is_long else (c.high >= lo)
+            if hit:
+                t = idx
+                break
+        if t is None:
+            continue
+
+        w = m.iloc[max(t - 5, 0):t + 1]
+        ref = w.high.max() if is_long else w.low.min()
+        for idx in range(t + 1, min(t + 61, len(m))):
+            c = m.iloc[idx]
+            broke = (c.close < lo) if is_long else (c.close > hi)
+            if broke:
+                break
+            choch = (c.close > ref) if is_long else (c.close < ref)
+            if choch:
+                stop = lo - STOP_PUFFER if is_long else hi + STOP_PUFFER
+                entries.append({
+                    "kind": b["kind"],
+                    "bt": b["t"],
+                    "t": int(c.time.timestamp()),
+                    "price": round(float(c.close), 2),
+                    "stop": round(float(stop), 2),
+                    "lo": round(lo, 2),
+                    "hi": round(hi, 2),
+                })
+                break
+    return entries
+
+
+def main():
+    now = datetime.now(timezone.utc)
+    state = load_state()
+    cutoff = now - timedelta(minutes=WINDOW_MIN)
+
+    h = login()
+    full = {n: get_candles(h, r) for n, r in FRAMES.items()}
+    m1 = get_candles(h, "MINUTE").iloc[:-1].reset_index(drop=True)
+    closed = {n: d.iloc[:-1].reset_index(drop=True) for n, d in full.items()}
+    trend = get_trend(closed["H1"])
+
+    m5 = closed["M5"]
+    blocks5 = find_blocks(m5)
+    ents5 = find_entries(m5, m1, blocks5)
+
+    def notify(key, text):
+        if key in state:
+            return
+        tg(text)
+        state[key] = now.timestamp()
+
+    def close5(i):
+        return m5.iloc[i].time + timedelta(minutes=5)
+
+    if now.weekday() < 5:
+        for b in blocks5:
+            kind, i, bt = b["kind"], b["i"], b["t"]
+            lo, hi = b["lo"], b["hi"]
+            is_long = kind == "long"
+            zone = f"{lo:.2f} - {hi:.2f}"
+            name = "Long" if is_long else "Short"
+            icon = "🟢" if is_long else "🔴"
+
+            if close5(i) >= cutoff:
+                notify(f"{kind}-{bt}-new",
+                       f"{icon} Neuer {name}-Orderblock (M5)\nZone: {zone}")
+
+            touched = False
+            for j in range(i + 1, len(m5)):
+                c = m5.iloc[j]
+                inv = (c.close < lo) if is_long else (c.close > hi)
+                tch = (c.low <= hi) if is_long else (c.high >= lo)
+                if inv:
+                    if close5(j) >= cutoff:
+                        notify(f"{kind}-{bt}-invalid",
+                               f"❌ {name}-Orderblock ungültig\nZone: {zone}")
+                    break
+                if tch and not touched:
+                    touched = True
+                    if close5(j) >= cutoff:
+                        notify(f"{kind}-{bt}-touch",
+                               f"⚡ {name}-Orderblock zum ersten Mal angetestet\nZone: {zone}")
+
+        trend_name = {"long": "Long", "short": "Short", "neutral": "Neutral"}[trend]
+        for e in ents5:
+            if e["t"] + 60 < cutoff.timestamp():
+                continue
+            is_long = e["kind"] == "long"
+            name = "Long" if is_long else "Short"
+            risk = abs(e["price"] - e["stop"])
+            if risk <= 0:
+                continue
+            if is_long:
+                target = m5.high.iloc[-60:].max()
+                reward = target - e["price"]
+            else:
+                target = m5.low.iloc[-60:].min()
+                reward = e["price"] - target
+            if reward >= risk * 0.5:
+                tline = f"Ziel: {target:.2f} (CRV 1:{reward / risk:.1f})"
+            else:
+                tline = "Ziel: offen"
+            fits = trend == "neutral" or e["kind"] == trend
+            tr = "passt" if fits else "GEGEN den Trend"
+            notify(
+                f"{e['kind']}-{e['bt']}-entry",
+                f"🚀 {name}-Einstieg bestätigt (M1-CHoCH)\n"
+                f"Zone: {e['lo']:.2f} - {e['hi']:.2f}\n"
+                f"Einstieg ca.: {e['price']:.2f}\n"
+                f"Stop: {e['stop']:.2f} (Risiko {risk:.1f} Punkte)\n"
+                f"{tline}\n"
+                f"H1-Trend: {trend_name} ({tr})\n"
+                f"Erst im Demokonto testen, kein Finanzrat.",
+            )
+
+    out = {
+        "updated": now.isoformat(),
+        "trend": trend,
+        "frames": {},
+        "entries": [],
+    }
+    for name, df_full in full.items():
+        blocks = blocks5 if name == "M5" else find_blocks(closed[name])
+        shown = df_full.iloc[-SHOW:]
+        first_t = int(shown.iloc[0].time.timestamp())
+        if name == "M5":
+            limit = max(first_t, int((now - timedelta(hours=APP_ENTRY_HOURS)).timestamp()))
+            out["entries"] = [
+                {k: v for k, v in e.items() if k != "bt"}
+                for e in ents5 if e["t"] >= limit
+            ]
+        visible = [b for b in blocks if b["t"] >= first_t]
+        merged = merge(visible, GAP[name])
+        clean = [
+            {
+                "kind": b["kind"],
+                "lo": round(b["lo"], 2),
+                "hi": round(b["hi"], 2),
+                "t": b["t"],
+                "status": b["status"],
+                "n": b["n"],
+                "with": trend == "neutral" or b["kind"] == trend,
+            }
+            for b in merged
+        ]
+        candles = [
+            {
+                "t": int(r.time.timestamp()),
+                "o": round(float(r.open), 2),
+                "h": round(float(r.high), 2),
+                "l": round(float(r.low), 2),
+                "c": round(float(r.close), 2),
+            }
+            for r in shown.itertuples()
+        ]
+        out["frames"][name] = {"candles": candles, "blocks": clean}
+
+    os.makedirs("docs", exist_ok=True)
+    with open("docs/data.json", "w") as f:
+        json.dump(out, f)
+    save_state(state)
+
+
+main()
