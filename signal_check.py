@@ -15,6 +15,7 @@ STOP_PUFFER = 0.5
 WINDOW_MIN = 30
 APP_ENTRY_HOURS = 6
 STATE_FILE = "sent.json"
+SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
@@ -91,6 +92,43 @@ def get_trend(h1):
     if e20 < e50 and last < e50:
         return "short"
     return "neutral"
+
+
+def calc_levels(h1, last):
+    df = h1.copy()
+    df["date"] = df.time.dt.date
+    df["hour"] = df.time.dt.hour
+    today = df.date.iloc[-1]
+    levels = []
+
+    prev = [d for d in df.date.unique() if d < today]
+    if prev:
+        p = df[df.date == prev[-1]]
+        levels.append({"n": "PDH", "p": float(p.high.max()), "k": "pd"})
+        levels.append({"n": "PDL", "p": float(p.low.min()), "k": "pd"})
+
+    t = df[df.date == today]
+    levels.append({"n": "Tageshoch", "p": float(t.high.max()), "k": "day"})
+    levels.append({"n": "Tagestief", "p": float(t.low.min()), "k": "day"})
+
+    for name, s, e in SESSIONS:
+        sel = df[(df.hour >= s) & (df.hour < e)]
+        if sel.empty:
+            continue
+        d = sel.date.iloc[-1]
+        w = sel[sel.date == d]
+        levels.append({"n": f"{name} Hoch", "p": float(w.high.max()), "k": "sess"})
+        levels.append({"n": f"{name} Tief", "p": float(w.low.min()), "k": "sess"})
+
+    base = int(last // 50) * 50
+    for k in range(-2, 4):
+        p = base + 50 * k
+        if abs(p - last) <= 100:
+            levels.append({"n": f"Marke {p}", "p": float(p), "k": "round"})
+
+    for l in levels:
+        l["p"] = round(l["p"], 2)
+    return levels
 
 
 def find_blocks(df):
@@ -246,6 +284,14 @@ def main():
     trend = get_trend(closed["H1"])
 
     m5 = closed["M5"]
+    last = float(m5.close.iloc[-1])
+    levels = calc_levels(full["H1"], last)
+    above = [l for l in levels if l["p"] > last]
+    below = [l for l in levels if l["p"] < last]
+    key = {
+        "res": min(above, key=lambda l: l["p"]) if above else None,
+        "sup": max(below, key=lambda l: l["p"]) if below else None,
+    }
     blocks5 = find_blocks(m5)
     ents5 = find_entries(m5, m1, blocks5)
 
@@ -296,16 +342,17 @@ def main():
             risk = abs(e["price"] - e["stop"])
             if risk <= 0:
                 continue
-            if is_long:
-                target = m5.high.iloc[-60:].max()
-                reward = target - e["price"]
-            else:
-                target = m5.low.iloc[-60:].min()
-                reward = e["price"] - target
-            if reward >= risk * 0.5:
-                tline = f"Ziel: {target:.2f} (CRV 1:{reward / risk:.1f})"
-            else:
-                tline = "Ziel: offen"
+            cands = sorted(
+                [l for l in levels
+                 if (l["p"] > e["price"] if is_long else l["p"] < e["price"])],
+                key=lambda l: abs(l["p"] - e["price"]),
+            )
+            tline = "Ziel: offen (kein Level mit CRV 1:1)"
+            for l in cands:
+                rew = abs(l["p"] - e["price"])
+                if rew >= risk:
+                    tline = f"Ziel: {l['p']:.2f} ({l['n']}, CRV 1:{rew / risk:.1f})"
+                    break
             fits = trend == "neutral" or e["kind"] == trend
             tr = "passt" if fits else "GEGEN den Trend"
             notify(
@@ -322,6 +369,8 @@ def main():
     out = {
         "updated": now.isoformat(),
         "trend": trend,
+        "levels": levels,
+        "key": key,
         "frames": {},
         "entries": [],
     }
