@@ -15,7 +15,6 @@ STOP_PUFFER = 0.5
 WINDOW_MIN = 30
 APP_ENTRY_HOURS = 6
 STATE_FILE = "sent.json"
-SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
@@ -94,43 +93,6 @@ def get_trend(h1):
     return "neutral"
 
 
-def calc_levels(h1, last):
-    df = h1.copy()
-    df["date"] = df.time.dt.date
-    df["hour"] = df.time.dt.hour
-    today = df.date.iloc[-1]
-    levels = []
-
-    prev = [d for d in df.date.unique() if d < today]
-    if prev:
-        p = df[df.date == prev[-1]]
-        levels.append({"n": "PDH", "p": float(p.high.max()), "k": "pd"})
-        levels.append({"n": "PDL", "p": float(p.low.min()), "k": "pd"})
-
-    t = df[df.date == today]
-    levels.append({"n": "Tageshoch", "p": float(t.high.max()), "k": "day"})
-    levels.append({"n": "Tagestief", "p": float(t.low.min()), "k": "day"})
-
-    for name, s, e in SESSIONS:
-        sel = df[(df.hour >= s) & (df.hour < e)]
-        if sel.empty:
-            continue
-        d = sel.date.iloc[-1]
-        w = sel[sel.date == d]
-        levels.append({"n": f"{name} Hoch", "p": float(w.high.max()), "k": "sess"})
-        levels.append({"n": f"{name} Tief", "p": float(w.low.min()), "k": "sess"})
-
-    base = int(last // 50) * 50
-    for k in range(-2, 4):
-        p = base + 50 * k
-        if abs(p - last) <= 100:
-            levels.append({"n": f"Marke {p}", "p": float(p), "k": "round"})
-
-    for l in levels:
-        l["p"] = round(l["p"], 2)
-    return levels
-
-
 def find_blocks(df):
     body = (df["close"] - df["open"]).abs()
     found = {}
@@ -169,22 +131,3 @@ def find_blocks(df):
                     status = "ungueltig"
                     break
                 if c.low <= hi:
-                    status = "angetestet"
-            else:
-                if c.close > hi:
-                    status = "ungueltig"
-                    break
-                if c.high >= lo:
-                    status = "angetestet"
-        result.append({
-            "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
-            "t": int(df.iloc[k].time.timestamp()), "status": status,
-        })
-    return result
-
-
-def merge(blocks, gap):
-    result = []
-    for kind in ("long", "short"):
-        grp = sorted(
-            [b for b in blocks if b["kind"] == kind an
