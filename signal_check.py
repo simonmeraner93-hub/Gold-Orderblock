@@ -14,6 +14,7 @@ SHOW = 120
 STOP_PUFFER = 0.5
 WINDOW_MIN = 30
 APP_ENTRY_HOURS = 6
+HISTORY_DAYS = 14
 STATE_FILE = "sent.json"
 SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
 
@@ -272,6 +273,35 @@ def find_entries(m5, m1, blocks):
     return entries
 
 
+def load_history():
+    try:
+        with open("docs/data.json") as f:
+            return json.load(f).get("history", [])
+    except Exception:
+        return []
+
+
+def evaluate_entry(h, m1, m5):
+    t_close = pd.Timestamp(h["t"] + 60, unit="s", tz="UTC")
+    if len(m1) and m1.time.iloc[0] <= t_close:
+        series = m1[m1.time >= t_close]
+    else:
+        series = m5[m5.time >= t_close.ceil("5min")]
+    is_long = h["kind"] == "long"
+    for r in series.itertuples():
+        if is_long:
+            stop_hit = r.low <= h["stop"]
+            tgt_hit = r.high >= h["target"]
+        else:
+            stop_hit = r.high >= h["stop"]
+            tgt_hit = r.low <= h["target"]
+        if stop_hit:
+            return "Stop", int(r.time.timestamp())
+        if tgt_hit:
+            return "Ziel", int(r.time.timestamp())
+    return "offen", None
+
+
 def main():
     now = datetime.now(timezone.utc)
     state = load_state()
@@ -366,11 +396,50 @@ def main():
                 f"Erst im Demokonto testen, kein Finanzrat.",
             )
 
+    history = load_history()
+    known = {x["id"] for x in history}
+    first_run = len(history) == 0
+    for e in ents5:
+        eid = f"{e['kind']}-{e['bt']}"
+        if eid in known:
+            continue
+        risk = abs(e["price"] - e["stop"])
+        if risk <= 0:
+            continue
+        if e["kind"] == "long":
+            target = e["price"] + risk
+        else:
+            target = e["price"] - risk
+        history.append({
+            "id": eid,
+            "kind": e["kind"],
+            "t": e["t"],
+            "price": e["price"],
+            "stop": e["stop"],
+            "target": round(target, 2),
+            "lo": e["lo"],
+            "hi": e["hi"],
+            "fit": None if first_run else (trend == "neutral" or e["kind"] == trend),
+            "res": "offen",
+            "rt": None,
+        })
+    keep_t = (now - timedelta(days=HISTORY_DAYS)).timestamp()
+    history = [x for x in history if x["t"] >= keep_t]
+    for x in history:
+        if x["res"] == "offen":
+            res, rt = evaluate_entry(x, m1, m5)
+            x["res"] = res
+            x["rt"] = rt
+            if res == "offen" and x["t"] < (now - timedelta(hours=23)).timestamp():
+                x["res"] = "unklar"
+    history.sort(key=lambda x: x["t"], reverse=True)
+
     out = {
         "updated": now.isoformat(),
         "trend": trend,
         "levels": levels,
         "key": key,
+        "history": history,
         "frames": {},
         "entries": [],
     }
