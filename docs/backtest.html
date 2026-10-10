@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest</title>
+<style>
+body{margin:0;background:#0b0f17;color:#e6e9ef;font-family:system-ui,sans-serif;padding:14px}
+h1{font-size:18px;margin:0 0 4px}
+h2{font-size:15px;margin:18px 0 4px}
+.s{font-size:12px;color:#8b93a5;margin-bottom:10px;line-height:1.4}
+.v{background:#141a26;border-radius:10px;padding:10px;margin-top:8px;border-left:4px solid #2a3142}
+.v.good{border-color:#22c55e}
+.v.bad{border-color:#ef4444}
+.v b{display:block;margin-bottom:2px}
+.t{font-size:12px;color:#8b93a5;margin-bottom:4px}
+.r{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:#b6bccb;padding:2px 0}
+.pos{color:#4ade80;white-space:nowrap}.neg{color:#f87171;white-space:nowrap}
+a{color:#7aa7ff}
+</style>
+</head>
+<body>
+<h1>Backtest der Varianten</h1>
+<div class="s" id="meta">Lade...</div>
+<div id="out"></div>
+<h2>Ergebnis nach Uhrzeit</h2>
+<div class="s">Deutsche Zeit, über den ganzen Zeitraum. Zeigt, wann Signale gut oder schlecht liefen. Es wird nichts ausgefiltert.</div>
+<div id="hours"></div>
+<p class="s"><a href="./">zurück zur App</a></p>
+<script>
+const f=n=>(n>=0?"+":"")+n.toFixed(1);
+const f2=n=>(n>=0?"+":"")+n.toFixed(2);
+function line(l,s){
+  const q=(s.w+s.l)?Math.round(100*s.w/(s.w+s.l))+" %":"-";
+  return '<div class="r"><span>'+l+': '+s.n+' Trades · '+s.w+' Ziel / '+s.l+' Stop'+(s.be?' / '+s.be+' BE':'')+' ('+q+')</span>'+
+    '<span class="'+(s.net_cost>=0?'pos':'neg')+'">'+f(s.net_cost)+' R</span></div>';
+}
+fetch("backtest.json?"+Date.now()).then(r=>r.json()).then(d=>{
+  if(d.error){document.getElementById("meta").textContent="Fehler: "+d.error;return;}
+  const dt=x=>new Date(x).toLocaleDateString("de-DE");
+  document.getElementById("meta").innerHTML=
+    "Zeitraum "+dt(d.from)+" bis "+dt(d.to)+" ("+d.days+" Tage). Training bis "+dt(d.split)+", danach Test. "+
+    "R = Vielfache deines Risikos, nach Abzug der Spanne ("+d.spread+" Punkte). "+
+    "Sortiert nach Ergebnis pro Trade im Training; Varianten mit weniger als "+d.min_train+" Trainings-Trades stehen unten. "+
+    "<b>Grün</b> heißt: in Training und Test im Plus. Bei vielen getesteten Varianten kann ein Treffer Zufall sein.";
+  document.getElementById("out").innerHTML=d.variants.map(v=>{
+    const cls=(v.train.net_cost>0&&v.test.net_cost>0&&v.test.n>=10)?"good":((v.train.net_cost<0&&v.test.net_cost<0)?"bad":"");
+    return '<div class="v '+cls+'"><b>'+v.name+'</b><div class="t">'+v.per_day+' Signale pro Tag · Ø Training '+f2(v.train.avg)+' R pro Trade · Ø Test '+f2(v.test.avg)+' R</div>'+
+      line("Training",v.train)+line("Test",v.test)+'</div>';
+  }).join("");
+  const names={"00-06":"00-06 Uhr","06-10":"06-10 Uhr","10-14":"10-14 Uhr","14-18":"14-18 Uhr","18-24":"18-24 Uhr"};
+  document.getElementById("hours").innerHTML=(d.hours||[]).map(h=>
+    '<div class="v"><b>'+h.name+'</b>'+Object.keys(h.blocks).map(k=>line(names[k]||k,h.blocks[k])).join("")+'</div>').join("");
+}).catch(()=>{document.getElementById("meta").textContent="Noch kein Ergebnis vorhanden.";});
+</script>
+</body>
+</html>
