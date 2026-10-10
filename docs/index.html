@@ -60,6 +60,9 @@ label{display:block;padding:4px 14px;font-size:14px;color:#8b93a5}
 <div id="stat"></div>
 <h2>Signale mit Ergebnis</h2>
 <div id="hist"></div>
+<h2>Test: Ausbruch M15 (Ziel 1:1)</h2>
+<div id="bstat"></div>
+<div id="bhist"></div>
 <h2>Zonen</h2>
 <div id="list"></div>
 </div>
@@ -275,6 +278,23 @@ function list(){
     '<div class="z"><div><b>'+w+' Ziel · '+l+' Stop · '+o+' offen oder unklar</b>'+
     '<small>Trefferquote '+rate(w,l)+' · Ergebnis '+(net>=0?'+':'')+net+' R (1 R = dein Risiko, ohne Spanne und Kosten)'+extra+'</small></div></div>':
     "<p>Noch keine Signale</p>";
+
+  const RL2={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
+  const RC2={Ziel:"win",Stop:"loss",offen:"open",unklar:"unk"};
+  const bs=DATA.brk_history||[];
+  const bwin=bs.filter(h=>h.res==="Ziel").length;
+  const bloss=bs.filter(h=>h.res==="Stop").length;
+  document.getElementById("bstat").innerHTML=bs.length?
+    '<div class="z"><div><b>'+bwin+' Ziel · '+bloss+' Stop · '+(bs.length-bwin-bloss)+' offen oder unklar</b>'+
+    '<small>Trefferquote '+rate(bwin,bloss)+' · Ergebnis '+((bwin-bloss)>=0?'+':'')+(bwin-bloss)+' R ohne Spanne. Testphase: erst nach 80 bis 100 Signalen aussagekräftig.</small></div></div>':
+    "<p>Noch keine Ausbruch-Signale</p>";
+  document.getElementById("bhist").innerHTML=bs.slice(0,30).map(h=>
+    '<div class="z h '+RC2[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
+    '</b> Einstieg '+h.price.toFixed(2)+
+    '<small>Stop '+h.stop.toFixed(2)+' · Ziel '+h.target.toFixed(2)+'<br>'+
+    new Date((h.t+60)*1000).toLocaleString("de-DE")+
+    '</small></div><div class="st"><b>'+RL2[h.res]+'</b></div></div>'
+  ).join("");
 
   const RL={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
   const RC={Ziel:"win",Stop:"loss",offen:"open",unklar:"unk"};
