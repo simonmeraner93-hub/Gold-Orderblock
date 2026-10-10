@@ -26,6 +26,9 @@ a{color:#7aa7ff}
 <h2>Runde 2: Zonen aus M15 und H1, stärkere Impulse</h2>
 <div class="s" id="meta2">Lade...</div>
 <div id="out2"></div>
+<h2>Runde 5: Ausbruch, Retest, Einstieg</h2>
+<div class="s" id="meta5">Lade...</div>
+<div id="out5"></div>
 <h2>Runde 4: andere Strategien, den ganzen Tag</h2>
 <div class="s" id="meta4">Lade...</div>
 <div id="out4"></div>
@@ -65,6 +68,12 @@ fetch("backtest.json?"+Date.now()).then(r=>r.json()).then(d=>{
     document.getElementById("meta2").innerHTML="Gleicher Zeitraum und gleiche Regeln wie oben. Zonen aus M5, M15 und H1, normale und starke Impulse. "+
       "Der <b>t-Wert</b> zeigt, wie sicher ein Plus ist: unter 2 ist es wahrscheinlich Zufall, und bei über 40 getesteten Varianten ist auch ein Wert von 2 bis 3 noch kein Beweis. Grün zählt nur mit mindestens 10 Test-Trades.";
     document.getElementById("out2").innerHTML=r2.variants.map(card).join("");
+  }
+  const r5=d.round5;
+  if(!r5||r5.error){document.getElementById("meta5").textContent=r5?("Fehler: "+r5.error):"Noch nicht vorhanden.";}
+  else{
+    document.getElementById("meta5").innerHTML="Zeitraum "+dt(r5.from)+" bis "+dt(r5.to)+" ("+r5.days+" Tage). Kurs bricht über das Hoch (Tief) der letzten 20 oder 40 Kerzen aus, in Richtung H1-Trend. Dann wartet der Test auf den Rücklauf zum durchbrochenen Niveau (Retest) und steigt dort ein: entweder nach einer Bestätigungskerze oder per Limit direkt am Niveau.";
+    document.getElementById("out5").innerHTML=r5.variants.map(card).join("");
   }
   const r4=d.round4;
   if(!r4||r4.error){document.getElementById("meta4").textContent=r4?("Fehler: "+r4.error):"Noch nicht vorhanden.";}
