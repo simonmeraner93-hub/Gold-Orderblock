@@ -26,6 +26,9 @@ a{color:#7aa7ff}
 <h2>Runde 2: Zonen aus M15 und H1, stärkere Impulse</h2>
 <div class="s" id="meta2">Lade...</div>
 <div id="out2"></div>
+<h2>Runde 4: andere Strategien, den ganzen Tag</h2>
+<div class="s" id="meta4">Lade...</div>
+<div id="out4"></div>
 <h2>Runde 3: nur Top-Setups</h2>
 <div class="s" id="meta3">Lade...</div>
 <div id="tab3"></div>
@@ -62,6 +65,12 @@ fetch("backtest.json?"+Date.now()).then(r=>r.json()).then(d=>{
     document.getElementById("meta2").innerHTML="Gleicher Zeitraum und gleiche Regeln wie oben. Zonen aus M5, M15 und H1, normale und starke Impulse. "+
       "Der <b>t-Wert</b> zeigt, wie sicher ein Plus ist: unter 2 ist es wahrscheinlich Zufall, und bei über 40 getesteten Varianten ist auch ein Wert von 2 bis 3 noch kein Beweis. Grün zählt nur mit mindestens 10 Test-Trades.";
     document.getElementById("out2").innerHTML=r2.variants.map(card).join("");
+  }
+  const r4=d.round4;
+  if(!r4||r4.error){document.getElementById("meta4").textContent=r4?("Fehler: "+r4.error):"Noch nicht vorhanden.";}
+  else{
+    document.getElementById("meta4").innerHTML="Zeitraum "+dt(r4.from)+" bis "+dt(r4.to)+" ("+r4.days+" Tage). Pullback zur EMA20, Ausbruch, Rückkehr zur Mitte, Asien- und London-Spanne. Stop 1,5 x ATR (bei den Spannen: andere Seite der Spanne). Gleiche Regeln wie vorher, mit t-Wert.";
+    document.getElementById("out4").innerHTML=r4.variants.map(card).join("");
   }
   const r3=d.round3;
   if(!r3||r3.error){document.getElementById("meta3").textContent=r3?("Fehler: "+r3.error):"Noch nicht vorhanden.";}
