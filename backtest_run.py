@@ -7,6 +7,7 @@ import requests
 
 import backtest as bt
 import backtest2 as bt2
+import backtest3 as bt3
 
 
 def write(res):
@@ -30,7 +31,7 @@ def main():
 
     m5 = None
     last_err = None
-    for days in (70, 40):
+    for days in (180, 120, 70, 40):
         bt.DAYS = days
         try:
             m5 = bt.load(h)
@@ -56,12 +57,20 @@ def main():
         traceback.print_exc()
         res["round2"] = {"error": str(e)}
 
+    try:
+        res["round3"] = bt3.analyze3(m5, res["id"])
+    except Exception as e:
+        traceback.print_exc()
+        res["round3"] = {"error": str(e)}
+
     write(res)
     print("Tage:", res["days"])
     for v in res["variants"]:
         print("R1", v["name"], "|", v["per_day"], "/Tag | Training:", v["train"], "| Test:", v["test"])
     for v in res.get("round2", {}).get("variants", []):
         print("R2", v["name"], "|", v["per_day"], "/Tag | t =", v["t"], "| Test:", v["test"])
+    for v in res.get("round3", {}).get("variants", []):
+        print("R3", v["name"], "|", v["per_day"], "/Tag | t =", v["t"], "| Test:", v["test"])
 
 
 main()
