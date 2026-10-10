@@ -17,6 +17,10 @@ APP_ENTRY_HOURS = 6
 HISTORY_DAYS = 14
 STATE_FILE = "sent.json"
 SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
+BRK_LOOK = 20
+BRK_ATR = 1.5
+BRK_COOLDOWN = 6
+BRK_BACKFILL_H = 20
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
@@ -273,12 +277,62 @@ def find_entries(m5, m1, blocks):
     return entries
 
 
-def load_history():
+def load_history(key="history"):
     try:
         with open("docs/data.json") as f:
-            return json.load(f).get("history", [])
+            return json.load(f).get(key, [])
     except Exception:
         return []
+
+
+def breakout_signals(m15, h1):
+    """Test-Strategie: Ausbruch aus 20 M15-Kerzen in Richtung H1-Trend, Stop 1,5 ATR, Ziel 1:1."""
+    d = m15.copy()
+    prev = d.close.shift(1)
+    tr = pd.concat([d.high - d.low, (d.high - prev).abs(), (d.low - prev).abs()], axis=1).max(axis=1)
+    d["atr"] = tr.rolling(14).mean()
+    d["hh"] = d.high.shift(1).rolling(BRK_LOOK).max()
+    d["ll"] = d.low.shift(1).rolling(BRK_LOOK).min()
+    d["ct"] = d.time + pd.Timedelta(minutes=15)
+
+    t = h1.copy()
+    e20 = t.close.ewm(span=20, adjust=False).mean()
+    e50 = t.close.ewm(span=50, adjust=False).mean()
+    t["trend"] = "neutral"
+    t.loc[(e20 > e50) & (t.close > e50), "trend"] = "long"
+    t.loc[(e20 < e50) & (t.close < e50), "trend"] = "short"
+    t["avail"] = t.time + pd.Timedelta(hours=1)
+    d = pd.merge_asof(d.sort_values("ct"), t[["avail", "trend"]],
+                      left_on="ct", right_on="avail", direction="backward")
+
+    out = []
+    last = {"long": -999, "short": -999}
+    for i in range(BRK_LOOK + 15, len(d)):
+        r = d.iloc[i]
+        if pd.isna(r.atr) or pd.isna(r.hh) or pd.isna(r.trend):
+            continue
+        kind = None
+        if r.close > r.hh:
+            kind = "long"
+        elif r.close < r.ll:
+            kind = "short"
+        if kind is None or i - last[kind] < BRK_COOLDOWN:
+            continue
+        last[kind] = i
+        if r.trend != kind:
+            continue
+        price = float(r.close)
+        risk = BRK_ATR * float(r.atr)
+        if risk < 1.0:
+            continue
+        stop = price - risk if kind == "long" else price + risk
+        target = price + risk if kind == "long" else price - risk
+        out.append({
+            "kind": kind, "ct": int(r.ct.timestamp()),
+            "price": round(price, 2), "stop": round(stop, 2),
+            "target": round(target, 2), "risk": round(risk, 2),
+        })
+    return out
 
 
 def evaluate_entry(h, m1, m5):
@@ -396,6 +450,43 @@ def main():
                 f"Erst im Demokonto testen, kein Finanzrat.",
             )
 
+    brk = breakout_signals(closed["M15"], closed["H1"])
+    if now.weekday() < 5:
+        for b in brk:
+            if b["ct"] < cutoff.timestamp():
+                continue
+            is_long = b["kind"] == "long"
+            name = "Long" if is_long else "Short"
+            notify(
+                f"brk-{b['kind']}-{b['ct']}",
+                f"📈 {name}-Ausbruch (Test, M15, im H1-Trend)\n"
+                f"Einstieg ca.: {b['price']:.2f}\n"
+                f"Stop: {b['stop']:.2f} (Risiko {b['risk']:.1f} Punkte)\n"
+                f"Ziel 1:1: {b['target']:.2f}\n"
+                f"Test-Strategie, nur im Demokonto, kein Finanzrat.",
+            )
+
+    bhist = load_history("brk_history")
+    bknown = {x["id"] for x in bhist}
+    for b in brk:
+        bid = f"{b['kind']}-{b['ct']}"
+        if bid in bknown or b["ct"] < (now - timedelta(hours=BRK_BACKFILL_H)).timestamp():
+            continue
+        bhist.append({
+            "id": bid, "kind": b["kind"], "t": b["ct"] - 60,
+            "price": b["price"], "stop": b["stop"], "target": b["target"],
+            "res": "offen", "rt": None,
+        })
+    bhist = [x for x in bhist if x["t"] >= (now - timedelta(days=HISTORY_DAYS)).timestamp()]
+    for x in bhist:
+        if x["res"] == "offen":
+            res, rt = evaluate_entry(x, m1, m5)
+            x["res"] = res
+            x["rt"] = rt
+            if res == "offen" and x["t"] < (now - timedelta(hours=23)).timestamp():
+                x["res"] = "unklar"
+    bhist.sort(key=lambda x: x["t"], reverse=True)
+
     history = load_history()
     known = {x["id"] for x in history}
     first_run = len(history) == 0
@@ -440,6 +531,7 @@ def main():
         "levels": levels,
         "key": key,
         "history": history,
+        "brk_history": bhist,
         "frames": {},
         "entries": [],
     }
