@@ -26,6 +26,10 @@ a{color:#7aa7ff}
 <h2>Runde 2: Zonen aus M15 und H1, stärkere Impulse</h2>
 <div class="s" id="meta2">Lade...</div>
 <div id="out2"></div>
+<h2>Runde 3: nur Top-Setups</h2>
+<div class="s" id="meta3">Lade...</div>
+<div id="tab3"></div>
+<div id="out3"></div>
 <h2>Ergebnis nach Uhrzeit</h2>
 <div class="s">Deutsche Zeit, über den ganzen Zeitraum. Zeigt, wann Signale gut oder schlecht liefen. Es wird nichts ausgefiltert.</div>
 <div id="hours"></div>
@@ -58,6 +62,18 @@ fetch("backtest.json?"+Date.now()).then(r=>r.json()).then(d=>{
     document.getElementById("meta2").innerHTML="Gleicher Zeitraum und gleiche Regeln wie oben. Zonen aus M5, M15 und H1, normale und starke Impulse. "+
       "Der <b>t-Wert</b> zeigt, wie sicher ein Plus ist: unter 2 ist es wahrscheinlich Zufall, und bei über 40 getesteten Varianten ist auch ein Wert von 2 bis 3 noch kein Beweis. Grün zählt nur mit mindestens 10 Test-Trades.";
     document.getElementById("out2").innerHTML=r2.variants.map(card).join("");
+  }
+  const r3=d.round3;
+  if(!r3||r3.error){document.getElementById("meta3").textContent=r3?("Fehler: "+r3.error):"Noch nicht vorhanden.";}
+  else{
+    document.getElementById("meta3").innerHTML="Zeitraum "+dt(r3.from)+" bis "+dt(r3.to)+" ("+r3.days+" Tage). Jedes Signal bekommt bis zu 7 Punkte: Fair Value Gap, Sweep, 4H-Trend passt, H1-Trend passt, kein Seitwärtsmarkt, Stop ab 6 Punkten, Zeit 9-21 Uhr. "+
+      "<b>Wichtig:</b> Zuerst die Tabellen. Steigt das Ergebnis mit der Punktzahl, ist das ein echtes Zeichen. Darunter die Varianten mit Mindestpunktzahl.";
+    document.getElementById("tab3").innerHTML=(r3.tables||[]).map(t=>
+      '<div class="v"><b>'+t.name+'</b>'+t.rows.map(r=>{
+        const q=(r.w+r.l)?Math.round(100*r.w/(r.w+r.l))+" %":"-";
+        return '<div class="r"><span>'+r.score+' Punkte: '+r.n+' Trades ('+q+' Ziel)</span><span class="'+(r.avg>=0?'pos':'neg')+'">Ø '+f2(r.avg)+' R</span></div>';
+      }).join("")+'</div>').join("");
+    document.getElementById("out3").innerHTML=r3.variants.map(card).join("");
   }
   const names={"00-06":"00-06 Uhr","06-10":"06-10 Uhr","10-14":"10-14 Uhr","14-18":"14-18 Uhr","18-24":"18-24 Uhr"};
   document.getElementById("hours").innerHTML=(d.hours||[]).map(h=>
