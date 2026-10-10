@@ -263,11 +263,17 @@ def summarize(df, col):
     }
 
 
-def run(h, req_id):
+def load(h):
     end = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     start = (end - timedelta(days=DAYS)).replace(hour=0, minute=0)
-    m5 = fetch_m5(h, start, end)
+    return fetch_m5(h, start, end)
 
+
+def run(h, req_id):
+    return analyze(load(h), req_id)
+
+
+def analyze(m5, req_id):
     first = m5.time.iloc[0]
     last = m5.time.iloc[-1]
     eval_start = first + pd.Timedelta(days=WARMUP_DAYS)

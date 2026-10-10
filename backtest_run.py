@@ -1,10 +1,18 @@
 import json
 import os
 import sys
+import traceback
 
 import requests
 
 import backtest as bt
+import backtest2 as bt2
+
+
+def write(res):
+    os.makedirs("docs", exist_ok=True)
+    with open("docs/backtest.json", "w") as f:
+        json.dump(res, f)
 
 
 def main():
@@ -19,21 +27,41 @@ def main():
     )
     r.raise_for_status()
     h = {"CST": r.headers["CST"], "X-SECURITY-TOKEN": r.headers["X-SECURITY-TOKEN"]}
-    try:
-        res = bt.run(h, os.environ.get("GITHUB_RUN_ID", "lokal"))
-    except Exception as e:
-        res = {"error": str(e)}
-        print("FEHLER:", e)
-        os.makedirs("docs", exist_ok=True)
-        with open("docs/backtest.json", "w") as f:
-            json.dump(res, f)
+
+    m5 = None
+    last_err = None
+    for days in (70, 40):
+        bt.DAYS = days
+        try:
+            m5 = bt.load(h)
+            print("Kerzen geladen:", len(m5), "bei", days, "Tagen")
+            break
+        except Exception as e:
+            last_err = e
+            print("Laden mit", days, "Tagen fehlgeschlagen:", e)
+    if m5 is None:
+        write({"error": f"Kerzen konnten nicht geladen werden: {last_err}"})
         sys.exit(1)
-    os.makedirs("docs", exist_ok=True)
-    with open("docs/backtest.json", "w") as f:
-        json.dump(res, f)
+
+    try:
+        res = bt.analyze(m5, os.environ.get("GITHUB_RUN_ID", "lokal"))
+    except Exception as e:
+        write({"error": str(e)})
+        print("FEHLER Runde 1:", e)
+        sys.exit(1)
+
+    try:
+        res["round2"] = bt2.analyze2(m5, res["id"])
+    except Exception as e:
+        traceback.print_exc()
+        res["round2"] = {"error": str(e)}
+
+    write(res)
     print("Tage:", res["days"])
     for v in res["variants"]:
-        print(v["name"], "| pro Tag:", v["per_day"], "| Training:", v["train"], "| Test:", v["test"])
+        print("R1", v["name"], "|", v["per_day"], "/Tag | Training:", v["train"], "| Test:", v["test"])
+    for v in res.get("round2", {}).get("variants", []):
+        print("R2", v["name"], "|", v["per_day"], "/Tag | t =", v["t"], "| Test:", v["test"])
 
 
 main()
