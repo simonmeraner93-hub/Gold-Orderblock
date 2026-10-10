@@ -23,6 +23,9 @@ a{color:#7aa7ff}
 <h1>Backtest der Varianten</h1>
 <div class="s" id="meta">Lade...</div>
 <div id="out"></div>
+<h2>Runde 2: Zonen aus M15 und H1, stärkere Impulse</h2>
+<div class="s" id="meta2">Lade...</div>
+<div id="out2"></div>
 <h2>Ergebnis nach Uhrzeit</h2>
 <div class="s">Deutsche Zeit, über den ganzen Zeitraum. Zeigt, wann Signale gut oder schlecht liefen. Es wird nichts ausgefiltert.</div>
 <div id="hours"></div>
@@ -43,11 +46,19 @@ fetch("backtest.json?"+Date.now()).then(r=>r.json()).then(d=>{
     "R = Vielfache deines Risikos, nach Abzug der Spanne ("+d.spread+" Punkte). "+
     "Sortiert nach Ergebnis pro Trade im Training; Varianten mit weniger als "+d.min_train+" Trainings-Trades stehen unten. "+
     "<b>Grün</b> heißt: in Training und Test im Plus. Bei vielen getesteten Varianten kann ein Treffer Zufall sein.";
-  document.getElementById("out").innerHTML=d.variants.map(v=>{
+  const card=v=>{
     const cls=(v.train.net_cost>0&&v.test.net_cost>0&&v.test.n>=10)?"good":((v.train.net_cost<0&&v.test.net_cost<0)?"bad":"");
-    return '<div class="v '+cls+'"><b>'+v.name+'</b><div class="t">'+v.per_day+' Signale pro Tag · Ø Training '+f2(v.train.avg)+' R pro Trade · Ø Test '+f2(v.test.avg)+' R</div>'+
+    return '<div class="v '+cls+'"><b>'+v.name+'</b><div class="t">'+v.per_day+' Signale pro Tag · Ø Training '+f2(v.train.avg)+' R pro Trade · Ø Test '+f2(v.test.avg)+' R'+(v.t!==undefined&&v.t!==null?' · t-Wert '+Number(v.t).toFixed(1):'')+'</div>'+
       line("Training",v.train)+line("Test",v.test)+'</div>';
-  }).join("");
+  };
+  document.getElementById("out").innerHTML=d.variants.map(card).join("");
+  const r2=d.round2;
+  if(!r2||r2.error){document.getElementById("meta2").textContent=r2?("Fehler: "+r2.error):"Noch nicht vorhanden.";}
+  else{
+    document.getElementById("meta2").innerHTML="Gleicher Zeitraum und gleiche Regeln wie oben. Zonen aus M5, M15 und H1, normale und starke Impulse. "+
+      "Der <b>t-Wert</b> zeigt, wie sicher ein Plus ist: unter 2 ist es wahrscheinlich Zufall, und bei über 40 getesteten Varianten ist auch ein Wert von 2 bis 3 noch kein Beweis. Grün zählt nur mit mindestens 10 Test-Trades.";
+    document.getElementById("out2").innerHTML=r2.variants.map(card).join("");
+  }
   const names={"00-06":"00-06 Uhr","06-10":"06-10 Uhr","10-14":"10-14 Uhr","14-18":"14-18 Uhr","18-24":"18-24 Uhr"};
   document.getElementById("hours").innerHTML=(d.hours||[]).map(h=>
     '<div class="v"><b>'+h.name+'</b>'+Object.keys(h.blocks).map(k=>line(names[k]||k,h.blocks[k])).join("")+'</div>').join("");
