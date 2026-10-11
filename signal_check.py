@@ -181,9 +181,15 @@ def find_blocks(df):
                     break
                 if c.high >= lo:
                     status = "angetestet"
+        fvg = False
+        if i >= 1 and i + 1 < len(df):
+            if kind == "long":
+                fvg = bool(df.iloc[i + 1].low > df.iloc[i - 1].high)
+            else:
+                fvg = bool(df.iloc[i + 1].high < df.iloc[i - 1].low)
         result.append({
             "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
-            "t": int(df.iloc[k].time.timestamp()), "status": status,
+            "t": int(df.iloc[k].time.timestamp()), "status": status, "fvg": fvg,
         })
     return result
 
@@ -272,9 +278,22 @@ def find_entries(m5, m1, blocks):
                     "stop": round(float(stop), 2),
                     "lo": round(lo, 2),
                     "hi": round(hi, 2),
+                    "fvg": bool(b.get("fvg", False)),
                 })
                 break
     return entries
+
+
+def quality(e, trend, h1_blocks):
+    """Drei Pruefpunkte wie im Video: Fair Value Gap, H1-Trend, Zone liegt in einer H1-Zone."""
+    fvg = bool(e.get("fvg"))
+    fit = e["kind"] == trend
+    h1z = any(
+        b["kind"] == e["kind"] and b["status"] != "ungueltig"
+        and b["lo"] <= e["hi"] and b["hi"] >= e["lo"]
+        for b in h1_blocks
+    )
+    return {"f": fvg, "t": fit, "z": h1z, "n": int(fvg) + int(fit) + int(h1z)}
 
 
 def load_history(key="history"):
@@ -378,6 +397,9 @@ def main():
     }
     blocks5 = find_blocks(m5)
     ents5 = find_entries(m5, m1, blocks5)
+    h1_blocks = find_blocks(closed["H1"])
+    for e in ents5:
+        e["q"] = quality(e, trend, h1_blocks)
 
     def notify(key, text):
         if key in state:
@@ -439,6 +461,10 @@ def main():
                     break
             fits = trend == "neutral" or e["kind"] == trend
             tr = "passt" if fits else "GEGEN den Trend"
+            q = e["q"]
+            mk = lambda v: "✓" if v else "✗"
+            qline = (f"Prüfung: Fair Value Gap {mk(q['f'])} · H1-Trend {mk(q['t'])} · "
+                     f"in H1-Zone {mk(q['z'])} ({q['n']} von 3)")
             notify(
                 f"{e['kind']}-{e['bt']}-entry",
                 f"🚀 {name}-Einstieg bestätigt (M1-CHoCH)\n"
@@ -447,6 +473,7 @@ def main():
                 f"Stop: {e['stop']:.2f} (Risiko {risk:.1f} Punkte)\n"
                 f"{tline}\n"
                 f"H1-Trend: {trend_name} ({tr})\n"
+                f"{qline}\n"
                 f"Erst im Demokonto testen, kein Finanzrat.",
             )
 
@@ -511,6 +538,7 @@ def main():
             "lo": e["lo"],
             "hi": e["hi"],
             "fit": None if first_run else (trend == "neutral" or e["kind"] == trend),
+            "q": None if first_run else e["q"],
             "res": "offen",
             "rt": None,
         })
