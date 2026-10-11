@@ -253,7 +253,7 @@ function list(){
   const es=(DATA.entries||[]).slice().sort((a,b)=>b.t-a.t).slice(0,10);
   en.innerHTML=es.map(e=>
     '<div class="z e '+e.kind+'"><div><b>'+(e.kind==="long"?"Long":"Short")+
-    '-Einstieg</b> ca. '+e.price.toFixed(2)+
+    '-Einstieg</b> ca. '+e.price.toFixed(2)+(e.q?' · '+e.q.n+'/3':'')+
     '<small>'+new Date(e.t*1000).toLocaleString("de-DE")+
     ' · Zone '+e.lo.toFixed(2)+' - '+e.hi.toFixed(2)+'</small></div>'+
     '<div class="st">Stop<br>'+e.stop.toFixed(2)+'</div></div>'
@@ -269,11 +269,15 @@ function list(){
   const tl=hs.filter(h=>h.fit===true&&h.res==="Stop").length;
   const aw=hs.filter(h=>h.fit===false&&h.res==="Ziel").length;
   const al=hs.filter(h=>h.fit===false&&h.res==="Stop").length;
+  const qs=n=>hs.filter(h=>h.q&&h.q.n>=n);
+  const qline=n=>{const a=qs(n);const x=a.filter(h=>h.res==="Ziel").length,y=a.filter(h=>h.res==="Stop").length;
+    return 'Mit mindestens '+n+' von 3 Prüfpunkten: '+x+' Ziel / '+y+' Stop ('+rate(x,y)+')';};
   let extra="";
   if(tw+tl+aw+al>0){
     extra='<br>Mit H1-Trend: '+tw+' Ziel / '+tl+' Stop ('+rate(tw,tl)+')'+
       '<br>Gegen den Trend: '+aw+' Ziel / '+al+' Stop ('+rate(aw,al)+')';
   }
+  if(hs.some(h=>h.q)){extra+='<br>'+qline(1)+'<br>'+qline(2)+'<br>'+qline(3);}
   document.getElementById("stat").innerHTML=hs.length?
     '<div class="z"><div><b>'+w+' Ziel · '+l+' Stop · '+o+' offen oder unklar</b>'+
     '<small>Trefferquote '+rate(w,l)+' · Ergebnis '+(net>=0?'+':'')+net+' R (1 R = dein Risiko, ohne Spanne und Kosten)'+extra+'</small></div></div>':
@@ -300,8 +304,8 @@ function list(){
   const RC={Ziel:"win",Stop:"loss",offen:"open",unklar:"unk"};
   document.getElementById("hist").innerHTML=hs.slice(0,30).map(h=>
     '<div class="z h '+RC[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
-    '</b> Einstieg '+h.price.toFixed(2)+
-    '<small>Stop '+h.stop.toFixed(2)+' · Ziel 1:1 '+h.target.toFixed(2)+'<br>'+
+    '</b> Einstieg '+h.price.toFixed(2)+(h.q?' · '+h.q.n+'/3':'')+
+    '<small>Stop '+h.stop.toFixed(2)+' · Ziel 1:1 '+h.target.toFixed(2)+(h.q?'<br>FVG '+(h.q.f?'✓':'✗')+' · H1-Trend '+(h.q.t?'✓':'✗')+' · H1-Zone '+(h.q.z?'✓':'✗'):'')+'<br>'+
     new Date(h.t*1000).toLocaleString("de-DE")+
     (h.rt?' → '+new Date(h.rt*1000).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}):'')+
     '</small></div><div class="st"><b>'+RL[h.res]+'</b></div></div>'
