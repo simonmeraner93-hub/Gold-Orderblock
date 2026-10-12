@@ -63,6 +63,9 @@ label{display:block;padding:4px 14px;font-size:14px;color:#8b93a5}
 <h2>Test: Ausbruch M15 (Ziel 1:1)</h2>
 <div id="bstat"></div>
 <div id="bhist"></div>
+<h2>Test: Ausbruch + Retest (Limit, Ziel 1:2)</h2>
+<div id="rstat"></div>
+<div id="rhist"></div>
 <h2>Zonen</h2>
 <div id="list"></div>
 </div>
@@ -298,6 +301,24 @@ function list(){
     '<small>Stop '+h.stop.toFixed(2)+' · Ziel '+h.target.toFixed(2)+'<br>'+
     new Date((h.t+60)*1000).toLocaleString("de-DE")+
     '</small></div><div class="st"><b>'+RL2[h.res]+'</b></div></div>'
+  ).join("");
+
+  const rs=DATA.rt_history||[];
+  const rw=rs.filter(h=>h.res==="Ziel").length;
+  const rl=rs.filter(h=>h.res==="Stop").length;
+  const rv=rs.filter(h=>h.st==="verfallen").length;
+  const rp=rs.filter(h=>h.st==="wartet").length;
+  document.getElementById("rstat").innerHTML=rs.length?
+    '<div class="z"><div><b>'+rw+' Ziel · '+rl+' Stop · '+rp+' wartet · '+rv+' verfallen</b>'+
+    '<small>Trefferquote '+rate(rw,rl)+' · Ergebnis '+((2*rw-rl)>=0?'+':'')+(2*rw-rl)+' R (Ziel = +2 R, Stop = -1 R, ohne Spanne). Nur ausgelöste Limits zählen.</small></div></div>':
+    "<p>Noch keine Signale</p>";
+  const RTL=h=>h.res==="Ziel"?"Ziel erreicht":h.res==="Stop"?"Stop erreicht":h.st==="ausgelöst"?"ausgelöst, offen":h.st==="wartet"?"wartet auf Retest":"verfallen";
+  const RTC=h=>h.res==="Ziel"?"win":h.res==="Stop"?"loss":h.st==="verfallen"?"unk":"open";
+  document.getElementById("rhist").innerHTML=rs.slice(0,30).map(h=>
+    '<div class="z h '+RTC(h)+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
+    '</b> Limit bei '+h.price.toFixed(2)+
+    '<small>Stop '+h.stop.toFixed(2)+' · Ziel 1:2 '+h.target.toFixed(2)+'<br>'+
+    new Date(h.t*1000).toLocaleString("de-DE")+'</small></div><div class="st"><b>'+RTL(h)+'</b></div></div>'
   ).join("");
 
   const RL={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
