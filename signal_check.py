@@ -327,6 +327,13 @@ def breakout_signals(m15, h1):
                       left_on="ct", right_on="avail", direction="backward")
 
     out = []
+    lastrow = d.iloc[-1]
+    cut24 = int(lastrow.ct.timestamp()) - 86400
+    stat = {"close": round(float(lastrow.close), 2),
+            "hh": None if pd.isna(lastrow.hh) else round(float(lastrow.hh), 2),
+            "ll": None if pd.isna(lastrow.ll) else round(float(lastrow.ll), 2),
+            "trend": None if pd.isna(lastrow.trend) else lastrow.trend,
+            "raw24": 0, "ok24": 0}
     last = {"long": -999, "short": -999}
     for i in range(BRK_LOOK + 15, len(d)):
         r = d.iloc[i]
@@ -340,8 +347,12 @@ def breakout_signals(m15, h1):
         if kind is None or i - last[kind] < BRK_COOLDOWN:
             continue
         last[kind] = i
+        if int(r.ct.timestamp()) >= cut24:
+            stat["raw24"] += 1
         if r.trend != kind:
             continue
+        if int(r.ct.timestamp()) >= cut24:
+            stat["ok24"] += 1
         price = float(r.close)
         risk = BRK_ATR * float(r.atr)
         if risk < 1.0:
@@ -355,7 +366,7 @@ def breakout_signals(m15, h1):
             "level": round(float(r.hh if kind == "long" else r.ll), 2),
             "atr": round(float(r.atr), 3),
         })
-    return out
+    return out, stat
 
 
 def eval_retest(sig, m5):
@@ -522,7 +533,7 @@ def main():
                 f"Erst im Demokonto testen, kein Finanzrat.",
             )
 
-    brk = breakout_signals(closed["M15"], closed["H1"])
+    brk, brk_stat = breakout_signals(closed["M15"], closed["H1"])
     if now.weekday() < 5:
         for b in brk:
             if b["ct"] < cutoff.timestamp():
@@ -639,6 +650,7 @@ def main():
         "history": history,
         "brk_history": bhist,
         "rt_history": rlist,
+        "brk_stat": brk_stat,
         "frames": {},
         "entries": [],
     }
