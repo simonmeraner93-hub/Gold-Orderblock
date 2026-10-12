@@ -21,6 +21,8 @@ BRK_LOOK = 20
 BRK_ATR = 1.5
 BRK_COOLDOWN = 6
 BRK_BACKFILL_H = 20
+RT_BARS = 36
+RT_FAIL = 0.5
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
@@ -350,8 +352,51 @@ def breakout_signals(m15, h1):
             "kind": kind, "ct": int(r.ct.timestamp()),
             "price": round(price, 2), "stop": round(stop, 2),
             "target": round(target, 2), "risk": round(risk, 2),
+            "level": round(float(r.hh if kind == "long" else r.ll), 2),
+            "atr": round(float(r.atr), 3),
         })
     return out
+
+
+def eval_retest(sig, m5):
+    """Ausbruch + Retest: Limit am durchbrochenen Niveau, Stop 1 ATR dahinter, Ziel 1:2."""
+    is_long = sig["kind"] == "long"
+    level, atr = sig["level"], sig["atr"]
+    stop = level - atr if is_long else level + atr
+    target = level + 2 * atr if is_long else level - 2 * atr
+    t0 = pd.Timestamp(sig["ct"], unit="s", tz="UTC")
+    seg = m5[m5.time >= t0].reset_index(drop=True)
+    if seg.empty:
+        return {"st": "wartet", "stop": round(stop, 2), "target": round(target, 2)}
+    fill = None
+    for j in range(min(RT_BARS, len(seg))):
+        r = seg.iloc[j]
+        touch = (r.low <= level) if is_long else (r.high >= level)
+        failed = (r.close < level - RT_FAIL * atr) if is_long else (r.close > level + RT_FAIL * atr)
+        if touch:
+            fill = j
+            break
+        if failed:
+            return {"st": "verfallen", "stop": round(stop, 2), "target": round(target, 2)}
+    if fill is None:
+        st = "verfallen" if len(seg) >= RT_BARS else "wartet"
+        return {"st": st, "stop": round(stop, 2), "target": round(target, 2)}
+    ft = int(seg.iloc[fill].time.timestamp())
+    res, rt = "offen", None
+    for k in range(fill, len(seg)):
+        r = seg.iloc[k]
+        stop_hit = (r.low <= stop) if is_long else (r.high >= stop)
+        if stop_hit:
+            res, rt = "Stop", int(r.time.timestamp())
+            break
+        if k == fill:
+            continue
+        tgt_hit = (r.high >= target) if is_long else (r.low <= target)
+        if tgt_hit:
+            res, rt = "Ziel", int(r.time.timestamp())
+            break
+    return {"st": "ausgelöst", "ft": ft, "res": res, "rt": rt,
+            "stop": round(stop, 2), "target": round(target, 2)}
 
 
 def evaluate_entry(h, m1, m5):
@@ -514,6 +559,39 @@ def main():
                 x["res"] = "unklar"
     bhist.sort(key=lambda x: x["t"], reverse=True)
 
+    rhist = {x["id"]: x for x in load_history("rt_history")}
+    for b in brk:
+        if b["ct"] < (now - timedelta(hours=BRK_BACKFILL_H)).timestamp():
+            continue
+        rid = f"{b['kind']}-{b['ct']}"
+        old_r = rhist.get(rid)
+        if old_r and old_r.get("final"):
+            continue
+        ev = eval_retest(b, m5)
+        is_long = b["kind"] == "long"
+        name = "Long" if is_long else "Short"
+        if now.weekday() < 5 and b["ct"] >= cutoff.timestamp():
+            notify(
+                f"rt-{rid}",
+                f"📈 {name}-Ausbruch + Retest (Test, M15)\n"
+                f"Limit-Order bei: {b['level']:.2f} (durchbrochenes Niveau)\n"
+                f"Stop: {ev['stop']:.2f} (Risiko {b['atr']:.1f} Punkte)\n"
+                f"Ziel 1:2: {ev['target']:.2f}\n"
+                f"Gilt ca. 3 Std. und verfällt, wenn der Kurs vorher klar durchfällt.\n"
+                f"Test-Strategie, nur im Demokonto, kein Finanzrat.",
+            )
+        if ev["st"] == "ausgelöst" and now.weekday() < 5 and ev["ft"] >= cutoff.timestamp():
+            notify(f"rt-{rid}-fill",
+                   f"✅ {name}-Limit ausgelöst bei {b['level']:.2f} (Ausbruch + Retest, Test)")
+        final = ev["st"] == "verfallen" or ev.get("res") in ("Ziel", "Stop")
+        rhist[rid] = {
+            "id": rid, "kind": b["kind"], "t": b["ct"], "price": b["level"],
+            "stop": ev["stop"], "target": ev["target"], "st": ev["st"],
+            "res": ev.get("res"), "final": final,
+        }
+    keep_r = (now - timedelta(days=HISTORY_DAYS)).timestamp()
+    rlist = sorted([x for x in rhist.values() if x["t"] >= keep_r], key=lambda x: x["t"], reverse=True)
+
     history = load_history()
     known = {x["id"] for x in history}
     first_run = len(history) == 0
@@ -560,6 +638,7 @@ def main():
         "key": key,
         "history": history,
         "brk_history": bhist,
+        "rt_history": rlist,
         "frames": {},
         "entries": [],
     }
