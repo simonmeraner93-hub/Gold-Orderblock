@@ -286,6 +286,9 @@ function list(){
     '<small>Trefferquote '+rate(w,l)+' · Ergebnis '+(net>=0?'+':'')+net+' R (1 R = dein Risiko, ohne Spanne und Kosten)'+extra+'</small></div></div>':
     "<p>Noch keine Signale</p>";
 
+  const bk=DATA.brk_stat;
+  const bkTxt=bk?('Radar: Kurs '+bk.close+' · Ausbruch bei Schluss über '+bk.hh+' (Long) oder unter '+bk.ll+' (Short) · H1-Trend '+(TR[bk.trend]||bk.trend)+
+    '<br>Letzte 24 Std.: '+bk.raw24+' Ausbrüche, davon '+bk.ok24+' im Trend (= Signale)'):"";
   const RL2={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
   const RC2={Ziel:"win",Stop:"loss",offen:"open",unklar:"unk"};
   const bs=DATA.brk_history||[];
@@ -294,7 +297,7 @@ function list(){
   document.getElementById("bstat").innerHTML=bs.length?
     '<div class="z"><div><b>'+bwin+' Ziel · '+bloss+' Stop · '+(bs.length-bwin-bloss)+' offen oder unklar</b>'+
     '<small>Trefferquote '+rate(bwin,bloss)+' · Ergebnis '+((bwin-bloss)>=0?'+':'')+(bwin-bloss)+' R ohne Spanne. Testphase: erst nach 80 bis 100 Signalen aussagekräftig.</small></div></div>':
-    "<p>Noch keine Ausbruch-Signale</p>";
+    "<p>Noch keine Ausbruch-Signale<br><small style='color:#8b93a5'>"+bkTxt+"</small></p>";
   document.getElementById("bhist").innerHTML=bs.slice(0,30).map(h=>
     '<div class="z h '+RC2[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
     '</b> Einstieg '+h.price.toFixed(2)+
@@ -311,7 +314,7 @@ function list(){
   document.getElementById("rstat").innerHTML=rs.length?
     '<div class="z"><div><b>'+rw+' Ziel · '+rl+' Stop · '+rp+' wartet · '+rv+' verfallen</b>'+
     '<small>Trefferquote '+rate(rw,rl)+' · Ergebnis '+((2*rw-rl)>=0?'+':'')+(2*rw-rl)+' R (Ziel = +2 R, Stop = -1 R, ohne Spanne). Nur ausgelöste Limits zählen.</small></div></div>':
-    "<p>Noch keine Signale</p>";
+    "<p>Noch keine Signale<br><small style='color:#8b93a5'>"+bkTxt+"</small></p>";
   const RTL=h=>h.res==="Ziel"?"Ziel erreicht":h.res==="Stop"?"Stop erreicht":h.st==="ausgelöst"?"ausgelöst, offen":h.st==="wartet"?"wartet auf Retest":"verfallen";
   const RTC=h=>h.res==="Ziel"?"win":h.res==="Stop"?"loss":h.st==="verfallen"?"unk":"open";
   document.getElementById("rhist").innerHTML=rs.slice(0,30).map(h=>
