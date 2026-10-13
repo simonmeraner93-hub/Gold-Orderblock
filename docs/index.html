@@ -66,6 +66,9 @@ label{display:block;padding:4px 14px;font-size:14px;color:#8b93a5}
 <h2>Test: Ausbruch + Retest (Limit, Ziel 1:2)</h2>
 <div id="rstat"></div>
 <div id="rhist"></div>
+<h2>Test: H1-Zone mit M5-Bestätigung</h2>
+<div id="hstat"></div>
+<div id="hhist"></div>
 <h2>Zonen</h2>
 <div id="list"></div>
 </div>
@@ -322,6 +325,22 @@ function list(){
     '</b> Limit bei '+h.price.toFixed(2)+
     '<small>Stop '+h.stop.toFixed(2)+' · Ziel 1:2 '+h.target.toFixed(2)+'<br>'+
     new Date(h.t*1000).toLocaleString("de-DE")+'</small></div><div class="st"><b>'+RTL(h)+'</b></div></div>'
+  ).join("");
+
+  const hz=DATA.h1_history||[];
+  const cnt=(k,v)=>hz.filter(h=>h[k]===v).length;
+  const hw1=cnt("res","Ziel"),hl1=cnt("res","Stop"),hw2=cnt("res2","Ziel"),hl2=cnt("res2","Stop");
+  document.getElementById("hstat").innerHTML=hz.length?
+    '<div class="z"><div><b>'+hz.length+' Signale</b>'+
+    '<small>Ziel 1:1: '+hw1+' Ziel / '+hl1+' Stop ('+rate(hw1,hl1)+') · '+((hw1-hl1)>=0?'+':'')+(hw1-hl1)+' R<br>'+
+    'Ziel 1:2: '+hw2+' Ziel / '+hl2+' Stop ('+rate(hw2,hl2)+') · '+((2*hw2-hl2)>=0?'+':'')+(2*hw2-hl2)+' R<br>ohne Spanne. Erst nach vielen Signalen aussagekräftig.</small></div></div>':
+    "<p>Noch keine Signale (H1-Zonen werden selten angetippt)</p>";
+  const HRL=r=>({Ziel:"Ziel",Stop:"Stop",offen:"offen",unklar:"unklar"}[r]);
+  document.getElementById("hhist").innerHTML=hz.slice(0,30).map(h=>
+    '<div class="z h '+RC2[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
+    '</b> Einstieg '+h.price.toFixed(2)+
+    '<small>H1-Zone '+h.lo.toFixed(2)+' - '+h.hi.toFixed(2)+' · Stop '+h.stop.toFixed(2)+'<br>Ziel 1:1 '+h.target.toFixed(2)+' ('+HRL(h.res)+') · Ziel 1:2 '+h.target2.toFixed(2)+' ('+HRL(h.res2)+')<br>'+
+    new Date((h.t+60)*1000).toLocaleString("de-DE")+'</small></div></div>'
   ).join("");
 
   const RL={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
