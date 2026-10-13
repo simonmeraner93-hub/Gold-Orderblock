@@ -121,9 +121,10 @@ function info(){
 
   const k=DATA.key||{};
   let h="";
-  if(k.res)h+='<span class="r">Widerstand '+k.res.p.toFixed(2)+' ('+k.res.n+', +'+(k.res.p-last).toFixed(1)+')</span>';
-  if(k.res&&k.sup)h+=" · ";
-  if(k.sup)h+='<span class="s">Support '+k.sup.p.toFixed(2)+' ('+k.sup.n+', -'+(last-k.sup.p).toFixed(1)+')</span>';
+  const num=v=>typeof v==="number"&&isFinite(v);
+  if(k.res&&num(k.res.p))h+='<span class="r">Widerstand '+k.res.p.toFixed(2)+' ('+(k.res.n||"")+', +'+(k.res.p-last).toFixed(1)+')</span>';
+  if(k.res&&k.sup&&num(k.res.p)&&num(k.sup.p))h+=" · ";
+  if(k.sup&&num(k.sup.p))h+='<span class="s">Support '+k.sup.p.toFixed(2)+' ('+(k.sup.n||"")+', -'+(last-k.sup.p).toFixed(1)+')</span>';
   document.getElementById("key").innerHTML=h;
 }
 
