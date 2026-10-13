@@ -453,6 +453,14 @@ def main():
     }
     blocks5 = find_blocks(m5)
     ents5 = find_entries(m5, m1, blocks5)
+    seen_e, uniq = set(), []
+    for e in sorted(ents5, key=lambda x: (x["t"], x["bt"])):
+        k = (e["kind"], e["t"])
+        if k in seen_e:
+            continue
+        seen_e.add(k)
+        uniq.append(e)
+    ents5 = uniq
     h1_blocks = find_blocks(closed["H1"])
     for e in ents5:
         e["q"] = quality(e, trend, h1_blocks)
@@ -633,6 +641,14 @@ def main():
         })
     keep_t = (now - timedelta(days=HISTORY_DAYS)).timestamp()
     history = [x for x in history if x["t"] >= keep_t]
+    seen_h, dedup = set(), []
+    for x in sorted(history, key=lambda x: x["t"]):
+        k = (x["kind"], x["t"], round(x["price"], 2))
+        if k in seen_h:
+            continue
+        seen_h.add(k)
+        dedup.append(x)
+    history = dedup
     for x in history:
         if x["res"] == "offen":
             res, rt = evaluate_entry(x, m1, m5)
