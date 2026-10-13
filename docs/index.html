@@ -90,7 +90,7 @@ async function load(){
     document.getElementById("trend").textContent="H1-Trend: "+TR[DATA.trend||"neutral"];
     render();
   }catch(e){
-    document.getElementById("upd").textContent="Daten konnten nicht geladen werden";
+    document.getElementById("upd").textContent="Daten konnten nicht geladen werden ("+e.message+")";
   }
 }
 
@@ -339,7 +339,7 @@ function list(){
   document.getElementById("hhist").innerHTML=hz.slice(0,30).map(h=>
     '<div class="z h '+RC2[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
     '</b> Einstieg '+h.price.toFixed(2)+
-    '<small>H1-Zone '+h.lo.toFixed(2)+' - '+h.hi.toFixed(2)+' · Stop '+h.stop.toFixed(2)+'<br>Ziel 1:1 '+h.target.toFixed(2)+' ('+HRL(h.res)+') · Ziel 1:2 '+h.target2.toFixed(2)+' ('+HRL(h.res2)+')<br>'+
+    '<small>H1-Zone '+h.lo.toFixed(2)+' - '+h.hi.toFixed(2)+' · Stop '+h.stop.toFixed(2)+'<br>Ziel 1:1 '+h.target.toFixed(2)+' ('+HRL(h.res)+') · Ziel 1:2 '+(h.target2||0).toFixed(2)+' ('+HRL(h.res2)+')<br>'+
     new Date((h.t+60)*1000).toLocaleString("de-DE")+'</small></div></div>'
   ).join("");
 
@@ -355,7 +355,11 @@ function list(){
   ).join("")||"<p>Noch keine Signale</p>";
 }
 
-function render(){draw();list();info();}
+function render(){
+  let err="";
+  [draw,list,info].forEach(f=>{try{f();}catch(e){err+=" "+f.name+": "+e.message;console.error(e);}});
+  if(err)document.getElementById("upd").textContent+=" · Anzeigefehler:"+err;
+}
 
 document.getElementById("tabs").addEventListener("click",e=>{
   if(e.target.dataset.f){
