@@ -1,20 +1,21 @@
-name: Orderblock Signal Check
+name: Signal Check
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: orderblock
+  group: signal-check
   cancel-in-progress: false
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,20 +24,16 @@ jobs:
       - run: pip install pandas numpy requests
       - run: python signal_check.py
         env:
+          CAPITAL_API_KEY: ${{ secrets.CAPITAL_API_KEY }}
+          CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
+          CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          CAPITAL_API_KEY: ${{ secrets.CAPITAL_API_KEY }}
-          CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
-          CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
-      - run: python export_data.py
-        env:
-          CAPITAL_API_KEY: ${{ secrets.CAPITAL_API_KEY }}
-          CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
-          CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
-      - name: Daten speichern
+      - name: Stand speichern
+        if: always()
         run: |
           git config user.name "orderblock-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add docs/data.json
-          if [ -f sent.json ]; then git add sent.json; fi
-          git diff --staged --quiet || (git commit -m "update data" && git push)
+          git add sent.json docs/data.json
+          git diff --staged --quiet || git commit -m "update"
+          for i in 1 2 3; do git pull --rebase && git push && break || sleep 5; done
