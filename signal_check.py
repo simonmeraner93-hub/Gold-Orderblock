@@ -276,6 +276,8 @@ def find_entries(m5, m1, blocks):
                 entries.append({
                     "kind": b["kind"],
                     "bt": b["t"],
+                    "k": int(b["k"]),
+                    "i": int(b["i"]),
                     "t": int(c.time.timestamp()),
                     "price": round(float(c.close), 2),
                     "stop": round(float(stop), 2),
@@ -287,8 +289,42 @@ def find_entries(m5, m1, blocks):
     return entries
 
 
-def quality(e, trend, h1_blocks):
-    """Drei Pruefpunkte wie im Video: Fair Value Gap, H1-Trend, Zone liegt in einer H1-Zone."""
+def sweep_info(m5, e, levels):
+    """Liquiditaets-Sweep: vor/waehrend der Zonenbildung wurde ein frueheres Tief (Long) bzw. Hoch (Short)
+    unterboten und der Kurs ist danach wieder zurueckgekehrt. Es zaehlen nur Niveaus, die es VOR dem Sweep gab."""
+    k, i = e.get("k"), e.get("i")
+    if k is None or i is None or k < 2 or i >= len(m5):
+        return None
+    is_long = e["kind"] == "long"
+    win = m5.iloc[max(k - 1, 0):i + 1]
+    close_i = float(m5.iloc[i].close)
+    cands = []
+    for n_bars, label in ((20, "Tief/Hoch der letzten 20 Kerzen"), (48, "Tief/Hoch der letzten 4 Std.")):
+        prior = m5.iloc[max(0, k - 1 - n_bars):max(k - 1, 0)]
+        if len(prior) < 10:
+            continue
+        if is_long:
+            lvl = float(prior.low.min())
+            if float(win.low.min()) < lvl < close_i:
+                cands.append((lvl, label.replace("Tief/Hoch", "Tief")))
+        else:
+            lvl = float(prior.high.max())
+            if float(win.high.max()) > lvl > close_i:
+                cands.append((lvl, label.replace("Tief/Hoch", "Hoch")))
+    for l in levels:
+        if l["n"] == ("PDL" if is_long else "PDH"):
+            if is_long and float(win.low.min()) < l["p"] < close_i:
+                cands.append((l["p"], "Vortagstief"))
+            if (not is_long) and float(win.high.max()) > l["p"] > close_i:
+                cands.append((l["p"], "Vortageshoch"))
+    if not cands:
+        return None
+    best = max(cands) if is_long else min(cands)
+    return best[1]
+
+
+def quality(e, trend, h1_blocks, m5=None, levels=None):
+    """Vier Pruefpunkte wie bei TraderJe: Fair Value Gap, H1-Trend, Zone in H1-Zone, Liquiditaets-Sweep."""
     fvg = bool(e.get("fvg"))
     fit = e["kind"] == trend
     h1z = any(
@@ -296,7 +332,9 @@ def quality(e, trend, h1_blocks):
         and b["lo"] <= e["hi"] and b["hi"] >= e["lo"]
         for b in h1_blocks
     )
-    return {"f": fvg, "t": fit, "z": h1z, "n": int(fvg) + int(fit) + int(h1z)}
+    sw = sweep_info(m5, e, levels or []) if m5 is not None else None
+    return {"f": fvg, "t": fit, "z": h1z, "s": sw, "v": 2,
+            "n": int(fvg) + int(fit) + int(h1z) + int(sw is not None)}
 
 
 def find_h1_entries(m5, h1, h1_blocks):
@@ -518,7 +556,7 @@ def main():
     ents5 = uniq
     h1_blocks = find_blocks(closed["H1"])
     for e in ents5:
-        e["q"] = quality(e, trend, h1_blocks)
+        e["q"] = quality(e, trend, h1_blocks, m5, levels)
 
     def notify(key, text):
         if key in state:
@@ -582,8 +620,9 @@ def main():
             tr = "passt" if fits else "GEGEN den Trend"
             q = e["q"]
             mk = lambda v: "✓" if v else "✗"
+            sw_txt = f"✓ ({q['s']})" if q.get("s") else "✗"
             qline = (f"Prüfung: Fair Value Gap {mk(q['f'])} · H1-Trend {mk(q['t'])} · "
-                     f"in H1-Zone {mk(q['z'])} ({q['n']} von 3)")
+                     f"in H1-Zone {mk(q['z'])} · Liquidity-Sweep {sw_txt} ({q['n']} von 4)")
             notify(
                 f"{e['kind']}-{e['bt']}-entry",
                 f"🚀 {name}-Einstieg bestätigt (M1-CHoCH)\n"
@@ -641,7 +680,7 @@ def main():
                 "id": e["id"], "kind": e["kind"], "t": e["ct"] - 60, "price": e["price"],
                 "stop": e["stop"], "target": e["t1"], "target2": e["t2"],
                 "lo": e["lo"], "hi": e["hi"], "res": "offen", "res2": "offen", "rt": None,
-                "q": quality({"kind": e["kind"], "lo": e["lo"], "hi": e["hi"], "fvg": False}, trend, []),
+                "q": quality({"kind": e["kind"], "lo": e["lo"], "hi": e["hi"], "fvg": False}, trend, [], m5, levels),
             }
             if now.weekday() < 5 and e["ct"] >= cutoff.timestamp():
                 is_long = e["kind"] == "long"
@@ -770,7 +809,7 @@ def main():
         if name == "M5":
             limit = max(first_t, int((now - timedelta(hours=APP_ENTRY_HOURS)).timestamp()))
             out["entries"] = [
-                {k: v for k, v in e.items() if k != "bt"}
+                {k: v for k, v in e.items() if k not in ("bt", "k", "i")}
                 for e in ents5 if e["t"] >= limit
             ]
         visible = [b for b in blocks if b["t"] >= first_t]
