@@ -21,6 +21,7 @@ BRK_LOOK = 20
 BRK_ATR = 1.5
 BRK_COOLDOWN = 6
 BRK_BACKFILL_H = 20
+H1_CHOCH_BARS = 12
 RT_BARS = 36
 RT_FAIL = 0.5
 
@@ -296,6 +297,60 @@ def quality(e, trend, h1_blocks):
         for b in h1_blocks
     )
     return {"f": fvg, "t": fit, "z": h1z, "n": int(fvg) + int(fit) + int(h1z)}
+
+
+def find_h1_entries(m5, h1, h1_blocks):
+    """Test: Kurs tippt erstmals eine H1-Zone an, Einstieg nach Bestaetigung auf M5 (Schluss ueber/unter das Hoch/Tief der Beruehrungskerze)."""
+    out = []
+    if len(m5) < 30 or len(h1) < 5:
+        return out
+    m5_start = m5.time.iloc[0]
+    for b in h1_blocks:
+        i = b["i"]
+        if b["status"] == "ungueltig" or i + 1 >= len(h1):
+            continue
+        is_long = b["kind"] == "long"
+        lo, hi = b["lo"], b["hi"]
+        avail = h1.iloc[i + 1].time + pd.Timedelta(hours=1)
+        # schon vor dem M5-Fenster angetestet -> kein Ersttest mehr
+        pre = h1[(h1.time > h1.iloc[i + 1].time) & (h1.time + pd.Timedelta(hours=1) <= m5_start)]
+        if ((pre.low <= hi) if is_long else (pre.high >= lo)).any():
+            continue
+        seg = m5[m5.time >= max(avail, m5_start)].reset_index(drop=True)
+        touch = None
+        for j in range(len(seg)):
+            c = seg.iloc[j]
+            inv = (c.close < lo) if is_long else (c.close > hi)
+            tch = (c.low <= hi) if is_long else (c.high >= lo)
+            if inv:
+                break
+            if tch:
+                touch = j
+                break
+        if touch is None:
+            continue
+        ref = seg.iloc[touch].high if is_long else seg.iloc[touch].low
+        for k in range(touch + 1, min(touch + 1 + H1_CHOCH_BARS, len(seg))):
+            c = seg.iloc[k]
+            broke = (c.close < lo) if is_long else (c.close > hi)
+            if broke:
+                break
+            if (c.close > ref) if is_long else (c.close < ref):
+                price = float(c.close)
+                stop = lo - STOP_PUFFER if is_long else hi + STOP_PUFFER
+                risk = abs(price - stop)
+                if risk < 1.0:
+                    break
+                ct = int((c.time + pd.Timedelta(minutes=5)).timestamp())
+                out.append({
+                    "id": f"h1-{b['kind']}-{b['t']}", "kind": b["kind"], "ct": ct,
+                    "price": round(price, 2), "stop": round(stop, 2), "risk": round(risk, 2),
+                    "t1": round(price + risk if is_long else price - risk, 2),
+                    "t2": round(price + 2 * risk if is_long else price - 2 * risk, 2),
+                    "lo": round(lo, 2), "hi": round(hi, 2),
+                })
+                break
+    return out
 
 
 def load_history(key="history"):
@@ -578,6 +633,43 @@ def main():
                 x["res"] = "unklar"
     bhist.sort(key=lambda x: x["t"], reverse=True)
 
+    h1e = find_h1_entries(m5, closed["H1"], h1_blocks)
+    hh = {x["id"]: x for x in load_history("h1_history")}
+    for e in h1e:
+        if e["id"] not in hh:
+            hh[e["id"]] = {
+                "id": e["id"], "kind": e["kind"], "t": e["ct"] - 60, "price": e["price"],
+                "stop": e["stop"], "target": e["t1"], "target2": e["t2"],
+                "lo": e["lo"], "hi": e["hi"], "res": "offen", "res2": "offen", "rt": None,
+                "q": quality({"kind": e["kind"], "lo": e["lo"], "hi": e["hi"], "fvg": False}, trend, []),
+            }
+            if now.weekday() < 5 and e["ct"] >= cutoff.timestamp():
+                is_long = e["kind"] == "long"
+                notify(
+                    f"h1z-{e['id']}",
+                    f"🕐 {'Long' if is_long else 'Short'}-Einstieg an H1-Zone (Test, M5-Bestätigung)\n"
+                    f"H1-Zone: {e['lo']:.2f} - {e['hi']:.2f}\n"
+                    f"Einstieg ca.: {e['price']:.2f}\n"
+                    f"Stop: {e['stop']:.2f} (Risiko {e['risk']:.1f} Punkte)\n"
+                    f"Ziel 1:1: {e['t1']:.2f} · Ziel 1:2: {e['t2']:.2f}\n"
+                    f"H1-Trend: {trend} ({'passt' if e['kind'] == trend else 'GEGEN den Trend'})\n"
+                    f"Test-Strategie, nur im Demokonto, kein Finanzrat.",
+                )
+    keep_h = (now - timedelta(days=HISTORY_DAYS)).timestamp()
+    for x in hh.values():
+        if x["res"] == "offen":
+            res, rt = evaluate_entry(x, m1, m5)
+            x["res"], x["rt"] = res, rt
+        if x["res2"] == "offen":
+            y = dict(x)
+            y["target"] = x["target2"]
+            res2, _ = evaluate_entry(y, m1, m5)
+            x["res2"] = res2
+        for key in ("res", "res2"):
+            if x[key] == "offen" and x["t"] < (now - timedelta(hours=23)).timestamp():
+                x[key] = "unklar"
+    hlist = sorted([x for x in hh.values() if x["t"] >= keep_h], key=lambda x: x["t"], reverse=True)
+
     rhist = {x["id"]: x for x in load_history("rt_history")}
     for b in brk:
         if b["ct"] < (now - timedelta(hours=BRK_BACKFILL_H)).timestamp():
@@ -666,6 +758,7 @@ def main():
         "history": history,
         "brk_history": bhist,
         "rt_history": rlist,
+        "h1_history": hlist,
         "brk_stat": brk_stat,
         "frames": {},
         "entries": [],
