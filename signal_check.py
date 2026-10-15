@@ -337,6 +337,20 @@ def quality(e, trend, h1_blocks, m5=None, levels=None):
             "n": int(fvg) + int(fit) + int(h1z) + int(sw is not None)}
 
 
+def qtext(q, with_zone=True):
+    """Prueftext fuer Telegram."""
+    sw = q.get("s")
+    parts = [f"Fair Value Gap {'✓' if q['f'] else '✗'}",
+             f"H1-Trend {'✓' if q['t'] else '✗'}"]
+    total = 3 if with_zone else 2
+    n = int(q["f"]) + int(q["t"]) + (1 if sw is not None else 0)
+    if with_zone:
+        parts.append(f"in H1-Zone {'✓' if q['z'] else '✗'}")
+        n += int(q["z"])
+    parts.append("Liquidity-Sweep " + (f"✓ ({sw})" if sw is not None else "✗"))
+    return "Prüfung: " + " · ".join(parts) + f" ({n} von {total + 1})"
+
+
 def find_h1_entries(m5, h1, h1_blocks):
     """Test: Kurs tippt erstmals eine H1-Zone an, Einstieg nach Bestaetigung auf M5 (Schluss ueber/unter das Hoch/Tief der Beruehrungskerze)."""
     out = []
@@ -579,8 +593,9 @@ def main():
             icon = "🟢" if is_long else "🔴"
 
             if close5(i) >= cutoff:
+                qq = quality(b, trend, h1_blocks, m5, levels)
                 notify(f"{kind}-{bt}-new",
-                       f"{icon} Neuer {name}-Orderblock (M5)\nZone: {zone}")
+                       f"{icon} GOLD: Neuer {name}-Orderblock (M5)\nZone: {zone}\n{qtext(qq)}")
 
             touched = False
             for j in range(i + 1, len(m5)):

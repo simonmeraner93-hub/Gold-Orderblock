@@ -337,6 +337,20 @@ def quality(e, trend, h1_blocks, m5=None, levels=None):
             "n": int(fvg) + int(fit) + int(h1z) + int(sw is not None)}
 
 
+def qtext(q, with_zone=True):
+    """Prueftext fuer Telegram."""
+    sw = q.get("s")
+    parts = [f"Fair Value Gap {'✓' if q['f'] else '✗'}",
+             f"H1-Trend {'✓' if q['t'] else '✗'}"]
+    total = 3 if with_zone else 2
+    n = int(q["f"]) + int(q["t"]) + (1 if sw is not None else 0)
+    if with_zone:
+        parts.append(f"in H1-Zone {'✓' if q['z'] else '✗'}")
+        n += int(q["z"])
+    parts.append("Liquidity-Sweep " + (f"✓ ({sw})" if sw is not None else "✗"))
+    return "Prüfung: " + " · ".join(parts) + f" ({n} von {total + 1})"
+
+
 def find_h1_entries(m5, h1, h1_blocks):
     """Test: Kurs tippt erstmals eine H1-Zone an, Einstieg nach Bestaetigung auf M5 (Schluss ueber/unter das Hoch/Tief der Beruehrungskerze)."""
     out = []
@@ -545,27 +559,45 @@ def pick_epic(h, cands):
     return None
 
 
+def day_levels(h1):
+    """Nur Vortageshoch und -tief (fuer den Sweep-Check)."""
+    d = h1.copy()
+    d["date"] = d.time.dt.date
+    today = d.date.iloc[-1]
+    prev = d[d.date < today]
+    if prev.empty:
+        return []
+    pd_ = prev[prev.date == prev.date.iloc[-1]]
+    return [{"n": "PDH", "p": float(pd_.high.max())}, {"n": "PDL", "p": float(pd_.low.min())}]
+
+
 def main():
     global STATE_FILE, EPIC
     STATE_FILE = STATE
     state = load_state()
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=WINDOW_MIN)
+    if now.weekday() >= 5:
+        return
     h = login()
     for name, cands in MARKETS:
-        if now.weekday() >= 5:
-            continue
         try:
             ep = pick_epic(h, cands)
             if ep is None:
                 print(name, "kein Epic gefunden", cands)
                 continue
             EPIC = ep
+            h1 = get_candles(h, "HOUR").iloc[:-1].reset_index(drop=True)
+            if len(h1) < 60:
+                continue
+            trend = get_trend(h1)
+            levels = day_levels(h1)
+            h1_blocks = find_blocks(h1)
             for tf, res, mins in TFS:
-                df = get_candles(h, res).iloc[:-1].reset_index(drop=True)
+                df = h1 if tf == "H1" else get_candles(h, res).iloc[:-1].reset_index(drop=True)
                 if len(df) < 60:
                     continue
-                raw = find_blocks(df)
+                raw = h1_blocks if tf == "H1" else find_blocks(df)
                 for b in raw:
                     if b["status"] == "ungueltig":
                         continue
@@ -575,11 +607,15 @@ def main():
                     key = f"{ep}-{tf}-{b['kind']}-{b['t']}"
                     if key in state:
                         continue
+                    q = quality(b, trend, h1_blocks, df, levels)
+                    if tf == "H1":
+                        q["s"] = "ja" if q["s"] is not None else None
                     dec = 5 if b["hi"] < 10 else 2
                     long_ = b["kind"] == "long"
                     icon = "🟢" if long_ else "🔴"
                     tg(f"{icon} {name}: Neuer {'Long' if long_ else 'Short'}-Orderblock ({tf})\n"
-                       f"Zone: {b['lo']:.{dec}f} - {b['hi']:.{dec}f}")
+                       f"Zone: {b['lo']:.{dec}f} - {b['hi']:.{dec}f}\n"
+                       f"{qtext(q, with_zone=(tf == 'M5'))}")
                     state[key] = now.timestamp()
                 print(name, ep, tf, "ok", len(raw), "Blöcke")
         except Exception as e:
