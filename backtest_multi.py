@@ -22,9 +22,6 @@ MARKETS = [
     ("S&P 500", ["US500"]),
     ("Nasdaq 100", ["US100"]),
     ("EUR/USD", ["EURUSD"]),
-    ("Silber", ["SILVER"]),
-    ("Öl (WTI)", ["OIL_CRUDE", "CRUDEOIL", "USOIL"]),
-    ("Öl (Brent)", ["OIL_BRENT", "BRENT", "UKOIL"]),
 ]
 REF_PRICE = 4160.0
 BASE_CONST = {

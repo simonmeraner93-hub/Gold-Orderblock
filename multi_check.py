@@ -526,12 +526,9 @@ def evaluate_entry(h, m1, m5):
 
 # Name, mögliche Epics bei capital.com (das erste, das existiert, wird genommen)
 MARKETS = [
-    ("Silber", ["SILVER"]),
     ("S&P 500", ["US500"]),
     ("Nasdaq 100", ["US100"]),
     ("EUR/USD", ["EURUSD"]),
-    ("Öl (WTI)", ["OIL_CRUDE", "CRUDEOIL", "USOIL"]),
-    ("Öl (Brent)", ["OIL_BRENT", "BRENT", "UKOIL"]),
 ]
 TFS = [("M5", "MINUTE_5", 5), ("H1", "HOUR", 60)]
 STATE = "sent_multi.json"
@@ -554,10 +551,10 @@ def main():
     state = load_state()
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=WINDOW_MIN)
-    if now.weekday() >= 5:
-        return
     h = login()
     for name, cands in MARKETS:
+        if now.weekday() >= 5:
+            continue
         try:
             ep = pick_epic(h, cands)
             if ep is None:
