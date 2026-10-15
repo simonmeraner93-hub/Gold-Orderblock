@@ -22,6 +22,8 @@ MARKETS = [
     ("S&P 500", ["US500"]),
     ("Nasdaq 100", ["US100"]),
     ("EUR/USD", ["EURUSD"]),
+    ("GBP/USD", ["GBPUSD"]),
+    ("DAX", ["DE40", "GER40", "DAX40"]),
 ]
 REF_PRICE = 4160.0
 BASE_CONST = {

@@ -544,6 +544,8 @@ MARKETS = [
     ("S&P 500", ["US500"]),
     ("Nasdaq 100", ["US100"]),
     ("EUR/USD", ["EURUSD"]),
+    ("GBP/USD", ["GBPUSD"]),
+    ("DAX", ["DE40", "GER40", "DAX40"]),
 ]
 TFS = [("M5", "MINUTE_5", 5), ("H1", "HOUR", 60)]
 STATE = "sent_multi.json"
