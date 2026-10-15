@@ -528,8 +528,11 @@ def evaluate_entry(h, m1, m5):
 MARKETS = [
     ("Silber", ["SILVER"]),
     ("S&P 500", ["US500"]),
+    ("Nasdaq 100", ["US100"]),
+    ("EUR/USD", ["EURUSD"]),
     ("Öl (WTI)", ["OIL_CRUDE", "CRUDEOIL", "USOIL"]),
 ]
+TFS = [("M5", "MINUTE_5", 5), ("H1", "HOUR", 60)]
 STATE = "sent_multi.json"
 
 
@@ -560,26 +563,27 @@ def main():
                 print(name, "kein Epic gefunden", cands)
                 continue
             EPIC = ep
-            m5 = get_candles(h, "MINUTE_5").iloc[:-1].reset_index(drop=True)
-            if len(m5) < 60:
-                continue
-            last = float(m5.close.iloc[-1])
-            raw = find_blocks(m5)
-            for b in raw:
-                if b["status"] == "ungueltig":
+            for tf, res, mins in TFS:
+                df = get_candles(h, res).iloc[:-1].reset_index(drop=True)
+                if len(df) < 60:
                     continue
-                close_t = m5.iloc[b["i"]].time + timedelta(minutes=5)
-                if close_t < cutoff:
-                    continue
-                key = f"{ep}-{b['kind']}-{b['t']}"
-                if key in state:
-                    continue
-                long_ = b["kind"] == "long"
-                icon = "🟢" if long_ else "🔴"
-                tg(f"{icon} {name}: Neuer {'Long' if long_ else 'Short'}-Orderblock (M5)\n"
-                      f"Zone: {b['lo']:.2f} - {b['hi']:.2f}")
-                state[key] = now.timestamp()
-            print(name, ep, "ok", len(raw), "Blöcke")
+                raw = find_blocks(df)
+                for b in raw:
+                    if b["status"] == "ungueltig":
+                        continue
+                    close_t = df.iloc[b["i"]].time + timedelta(minutes=mins)
+                    if close_t < cutoff:
+                        continue
+                    key = f"{ep}-{tf}-{b['kind']}-{b['t']}"
+                    if key in state:
+                        continue
+                    dec = 5 if b["hi"] < 10 else 2
+                    long_ = b["kind"] == "long"
+                    icon = "🟢" if long_ else "🔴"
+                    tg(f"{icon} {name}: Neuer {'Long' if long_ else 'Short'}-Orderblock ({tf})\n"
+                       f"Zone: {b['lo']:.{dec}f} - {b['hi']:.{dec}f}")
+                    state[key] = now.timestamp()
+                print(name, ep, tf, "ok", len(raw), "Blöcke")
         except Exception as e:
             print(name, "Fehler:", e)
     save_state(state)
