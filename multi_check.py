@@ -531,6 +531,7 @@ MARKETS = [
     ("Nasdaq 100", ["US100"]),
     ("EUR/USD", ["EURUSD"]),
     ("Öl (WTI)", ["OIL_CRUDE", "CRUDEOIL", "USOIL"]),
+    ("Öl (Brent)", ["OIL_BRENT", "BRENT", "UKOIL"]),
 ]
 TFS = [("M5", "MINUTE_5", 5), ("H1", "HOUR", 60)]
 STATE = "sent_multi.json"

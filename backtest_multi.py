@@ -24,6 +24,7 @@ MARKETS = [
     ("EUR/USD", ["EURUSD"]),
     ("Silber", ["SILVER"]),
     ("Öl (WTI)", ["OIL_CRUDE", "CRUDEOIL", "USOIL"]),
+    ("Öl (Brent)", ["OIL_BRENT", "BRENT", "UKOIL"]),
 ]
 REF_PRICE = 4160.0
 BASE_CONST = {
