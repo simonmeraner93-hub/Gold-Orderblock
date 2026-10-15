@@ -338,17 +338,18 @@ def quality(e, trend, h1_blocks, m5=None, levels=None):
 
 
 def qtext(q, with_zone=True):
-    """Prueftext fuer Telegram."""
+    """Prueftext fuer Telegram. q["f"] None = Fair Value Gap noch nicht bekannt (Folgekerze fehlt)."""
     sw = q.get("s")
-    parts = [f"Fair Value Gap {'✓' if q['f'] else '✗'}",
+    fvg = q.get("f")
+    parts = [f"Fair Value Gap {'?' if fvg is None else ('✓' if fvg else '✗')}",
              f"H1-Trend {'✓' if q['t'] else '✗'}"]
-    total = 3 if with_zone else 2
-    n = int(q["f"]) + int(q["t"]) + (1 if sw is not None else 0)
+    n = int(bool(fvg)) + int(q["t"]) + (1 if sw is not None else 0)
     if with_zone:
         parts.append(f"in H1-Zone {'✓' if q['z'] else '✗'}")
         n += int(q["z"])
     parts.append("Liquidity-Sweep " + (f"✓ ({sw})" if sw is not None else "✗"))
-    return "Prüfung: " + " · ".join(parts) + f" ({n} von {total + 1})"
+    total = 4 if with_zone else 3
+    return "Prüfung: " + " · ".join(parts) + f" ({n} von {total}" + (", FVG noch offen)" if fvg is None else ")")
 
 
 def find_h1_entries(m5, h1, h1_blocks):
@@ -608,6 +609,8 @@ def main():
                     if key in state:
                         continue
                     q = quality(b, trend, h1_blocks, df, levels)
+                    if b["i"] + 1 >= len(df):
+                        q["f"] = None  # Folgekerze fehlt noch
                     if tf == "H1":
                         q["s"] = "ja" if q["s"] is not None else None
                     dec = 5 if b["hi"] < 10 else 2

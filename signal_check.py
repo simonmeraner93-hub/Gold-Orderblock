@@ -338,17 +338,18 @@ def quality(e, trend, h1_blocks, m5=None, levels=None):
 
 
 def qtext(q, with_zone=True):
-    """Prueftext fuer Telegram."""
+    """Prueftext fuer Telegram. q["f"] None = Fair Value Gap noch nicht bekannt (Folgekerze fehlt)."""
     sw = q.get("s")
-    parts = [f"Fair Value Gap {'✓' if q['f'] else '✗'}",
+    fvg = q.get("f")
+    parts = [f"Fair Value Gap {'?' if fvg is None else ('✓' if fvg else '✗')}",
              f"H1-Trend {'✓' if q['t'] else '✗'}"]
-    total = 3 if with_zone else 2
-    n = int(q["f"]) + int(q["t"]) + (1 if sw is not None else 0)
+    n = int(bool(fvg)) + int(q["t"]) + (1 if sw is not None else 0)
     if with_zone:
         parts.append(f"in H1-Zone {'✓' if q['z'] else '✗'}")
         n += int(q["z"])
     parts.append("Liquidity-Sweep " + (f"✓ ({sw})" if sw is not None else "✗"))
-    return "Prüfung: " + " · ".join(parts) + f" ({n} von {total + 1})"
+    total = 4 if with_zone else 3
+    return "Prüfung: " + " · ".join(parts) + f" ({n} von {total}" + (", FVG noch offen)" if fvg is None else ")")
 
 
 def find_h1_entries(m5, h1, h1_blocks):
@@ -594,6 +595,8 @@ def main():
 
             if close5(i) >= cutoff:
                 qq = quality(b, trend, h1_blocks, m5, levels)
+                if i + 1 >= len(m5):
+                    qq["f"] = None
                 notify(f"{kind}-{bt}-new",
                        f"{icon} GOLD: Neuer {name}-Orderblock (M5)\nZone: {zone}\n{qtext(qq)}")
 
