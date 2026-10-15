@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest Märkte</title>
+<style>
+body{margin:0;background:#0b0f17;color:#e6e9ef;font-family:system-ui,sans-serif;padding:14px}
+h1{font-size:18px;margin:0 0 4px}
+h2{font-size:15px;margin:18px 0 4px}
+.s{font-size:12px;color:#8b93a5;margin-bottom:10px;line-height:1.4}
+.v{background:#141a26;border-radius:10px;padding:10px;margin-top:8px;border-left:4px solid #2a3142}
+.v.good{border-color:#22c55e}.v.bad{border-color:#ef4444}
+.v b{display:block;margin-bottom:2px}
+.t{font-size:12px;color:#8b93a5;margin-bottom:4px}
+.r{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:#b6bccb;padding:2px 0}
+.pos{color:#4ade80;white-space:nowrap}.neg{color:#f87171;white-space:nowrap}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.tabs button{background:#141a26;color:#e6e9ef;border:1px solid #2a3142;border-radius:10px;padding:8px 12px;font-size:14px}
+.tabs button.on{background:#2563eb;border-color:#2563eb}
+a{color:#7aa7ff}
+</style>
+</head>
+<body>
+<h1>Backtest auf mehreren Märkten</h1>
+<div class="s" id="meta">Lade...</div>
+<div id="sum"></div>
+<div class="tabs" id="tabs"></div>
+<div id="out"></div>
+<p class="s"><a href="./">zurück zur App</a></p>
+<script>
+const f=n=>(n>=0?"+":"")+n.toFixed(1);
+const f2=n=>(n>=0?"+":"")+n.toFixed(2);
+const esc=s=>String(s).replace(/[<>&]/g,"");
+function line(l,s){
+  const q=(s.w+s.l)?Math.round(100*s.w/(s.w+s.l))+" %":"-";
+  return '<div class="r"><span>'+l+': '+s.n+' Trades · '+s.w+' Ziel / '+s.l+' Stop ('+q+')</span>'+
+    '<span class="'+(s.net_cost>=0?'pos':'neg')+'">'+f(s.net_cost)+' R</span></div>';
+}
+const isGood=v=>v.train.net_cost>0&&v.test.net_cost>0&&v.test.n>=10;
+const card=v=>{
+  const cls=isGood(v)?"good":((v.train.net_cost<0&&v.test.net_cost<0)?"bad":"");
+  return '<div class="v '+cls+'"><b>'+esc(v.name)+'</b><div class="t">'+v.per_day+' Signale pro Tag · Ø Training '+f2(v.train.avg)+' R · Ø Test '+f2(v.test.avg)+' R'+(v.t!=null?' · t-Wert '+Number(v.t).toFixed(1):'')+'</div>'+
+    line("Training",v.train)+line("Test",v.test)+'</div>';
+};
+const ROUNDS=[["round2","Zonen aus M5, M15, H1"],["round5","Ausbruch + Retest"],["round4","Pullback, Ausbruch, Rückkehr, Spannen"]];
+function all(m){const a=[];ROUNDS.forEach(([k,n])=>{const r=m[k];if(r&&r.variants)r.variants.forEach(v=>a.push(Object.assign({grp:n},v)));});return a;}
+let D=null,cur=0;
+function show(i){
+  cur=i;
+  document.querySelectorAll("#tabs button").forEach((b,j)=>b.classList.toggle("on",j===i));
+  const m=D.markets[i];
+  if(m.error&&!m.round2){document.getElementById("out").innerHTML='<div class="v bad">'+esc(m.error)+'</div>';return;}
+  let h='<div class="s">Epic '+esc(m.epic||"")+' · Kurs '+m.price+' · Spanne '+m.spread+' ('+m.spread_pct+' % vom Kurs'+(m.spread_note?', '+m.spread_note:'')+') · '+m.candles+' Kerzen</div>';
+  ROUNDS.forEach(([k,n])=>{
+    const r=m[k];
+    h+='<h2>'+n+'</h2>';
+    if(!r){h+='<div class="s">Läuft noch...</div>';return;}
+    if(r.error){h+='<div class="s">Fehler: '+esc(r.error)+'</div>';return;}
+    h+='<div class="s">'+r.days+' Tage</div>'+r.variants.map(card).join("");
+  });
+  document.getElementById("out").innerHTML=h;
+}
+fetch("backtest_multi.json?"+Date.now()).then(r=>r.json()).then(d=>{
+  D=d;
+  document.getElementById("meta").innerHTML="Gleiche Regeln wie bei Gold. Die Spanne wird aus echten Kauf- und Verkaufskursen gemessen und in R abgezogen. <b>Grün</b> heißt: in Training und Test im Plus (mind. 10 Test-Trades). Bei vielen Varianten und Märkten sind einzelne Treffer oft Zufall. Ein t-Wert unter 2 ist wahrscheinlich Zufall.";
+  document.getElementById("sum").innerHTML=d.markets.map(m=>{
+    const a=all(m);const g=a.filter(isGood);
+    const best=g.slice().sort((x,y)=>(y.t||0)-(x.t||0))[0];
+    return '<div class="v '+(g.length?'good':'')+'"><b>'+esc(m.name)+'</b><div class="t">'+
+      (m.error&&!a.length?esc(m.error):('Spanne '+m.spread_pct+' % · '+a.length+' Varianten · '+g.length+' grün'+(best?' · beste grüne: '+esc(best.name)+' (t '+Number(best.t||0).toFixed(1)+')':'')))+'</div></div>';
+  }).join("");
+  document.getElementById("tabs").innerHTML=d.markets.map((m,i)=>'<button>'+esc(m.name)+'</button>').join("");
+  document.querySelectorAll("#tabs button").forEach((b,i)=>b.onclick=()=>show(i));
+  show(0);
+}).catch(()=>{document.getElementById("meta").textContent="Noch kein Ergebnis vorhanden.";});
+</script>
+</body>
+</html>
