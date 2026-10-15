@@ -86,7 +86,7 @@ def gen_htf_trades(m5, tf, impulse, zone_type, entry_mode):
             zlo, zhi = min(ko, kc), max(ko, kc)
         else:
             zlo, zhi = float(d.low.iloc[k]), float(d.high.iloc[k])
-        if zhi - zlo < 0.05:
+        if zhi - zlo < bt.MIN_ZONE:
             continue
         avail = dtimes[i + 1] + pd.Timedelta(minutes=minutes)
         s = int(mtimes.searchsorted(avail))

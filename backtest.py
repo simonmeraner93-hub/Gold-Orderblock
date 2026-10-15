@@ -21,6 +21,7 @@ SWING = 10
 STOP_PUFFER = 0.5
 SPREAD = 0.6
 MIN_RISK = 1.0
+MIN_ZONE = 0.05
 MAX_BARS = 288
 CHOCH_BARS = 12
 LIMIT_BARS = 288
@@ -164,7 +165,7 @@ def gen_trades(m5, zone_type, entry_mode):
             zlo, zhi = float(min(o[k], c[k])), float(max(o[k], c[k]))
         else:
             zlo, zhi = float(lo[k]), float(hi[k])
-        if zhi - zlo < 0.05:
+        if zhi - zlo < MIN_ZONE:
             continue
 
         if entry_mode == "choch":
