@@ -561,7 +561,9 @@ def main():
     def notify(key, text):
         if key in state:
             return
-        tg(text)
+        # Nur neue Orderblöcke werden gemeldet, alles andere bleibt still
+        if key.endswith("-new"):
+            tg(text)
         state[key] = now.timestamp()
 
     def close5(i):
