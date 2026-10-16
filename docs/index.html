@@ -3,88 +3,77 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gold Orderblock Radar</title>
+<title>Orderblock Radar</title>
 <style>
 body{margin:0;background:#0b0f17;color:#e6e9ef;font-family:system-ui,sans-serif}
-header{padding:12px 14px}
+header{padding:12px 14px 4px}
 h1{font-size:18px;margin:0 0 4px}
 h2{font-size:15px;margin:14px 0 0}
 #upd{font-size:12px;color:#8b93a5}
-#trend{font-size:14px;margin-top:4px}
-#key{font-size:13px;margin-top:6px}
+#ov{margin-top:8px;font-size:14px}
+#ov .o{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin-top:4px;border-radius:8px;background:#141a26;border-left:4px solid #6b7280;border-right:2px solid transparent}
+#ov .o.long{border-left-color:#22c55e}
+#ov .o.short{border-left-color:#ef4444}
+#ov .o.sel{background:#1d2740;border-right-color:#2b6cff}
+#ov .o b.long{color:#4ade80}
+#ov .o b.short{color:#f87171}
+#ov .o b.neutral{color:#9ca3af}
+#ov .o small{color:#8b93a5;margin-left:8px}
+#key{font-size:13px;margin-top:8px}
 #key .r{color:#f87171}
 #key .s{color:#4ade80}
-#ov{margin-top:8px;font-size:13px}
-#ov .o{display:flex;justify-content:space-between;padding:6px 10px;margin-top:4px;border-radius:8px;background:#141a26;border-left:4px solid #6b7280}
-#ov .o.long{border-color:#22c55e}#ov .o.short{border-color:#ef4444}
-#ov .o b.long{color:#4ade80}#ov .o b.short{color:#f87171}
 #in{font-size:13px;margin-top:6px;color:#facc15}
-.tabs{display:flex;gap:8px;padding:0 14px 8px}
+.tabs{display:flex;gap:8px;padding:8px 14px}
 .tabs button{flex:1;padding:10px;border-radius:10px;border:1px solid #2a3142;background:#141a26;color:#e6e9ef;font-size:15px}
 .tabs button.on{background:#2b6cff;border-color:#2b6cff}
-canvas{width:100%;height:55vh;display:block}
+.tabs button.zm{flex:0 0 48px;font-size:20px;padding:6px}
+canvas{width:100%;height:62vh;display:block;touch-action:pan-y}
 label{display:block;padding:4px 14px;font-size:14px;color:#8b93a5}
 .list{padding:0 14px 20px}
 .z{display:flex;justify-content:space-between;padding:10px;margin-top:8px;border-radius:10px;background:#141a26;border-left:4px solid}
 .z.long{border-color:#22c55e}
 .z.short{border-color:#ef4444}
-.z.e{background:#1d2433}
 .z.ag{opacity:.55}
 .z small{color:#8b93a5;display:block}
 .st{font-size:13px;align-self:center;text-align:right}
-.z.h.win{border-color:#22c55e}
-.z.h.loss{border-color:#ef4444}
-.z.h.open{border-color:#facc15}
-.z.h.unk{border-color:#6b7280}
-.z.h small b{color:#e6e9ef}
 </style>
 </head>
 <body>
 <header>
-<h1>Gold Orderblock Radar</h1>
+<h1>Orderblock Radar</h1>
 <div id="upd">Lade...</div>
-<div id="trend"></div>
+<div id="ov"></div>
 <div id="key"></div>
 <div id="in"></div>
-<div id="ov"></div>
 </header>
 <div class="tabs" id="tabs">
 <button data-f="M5" class="on">M5</button>
-<button data-f="M15">M15</button>
 <button data-f="H1">H1</button>
+<button class="zm" id="zin">+</button>
+<button class="zm" id="zout">−</button>
 </div>
 <canvas id="cv"></canvas>
 <label><input type="checkbox" id="lv" checked> Linien: Vortag und Tag (PDH/PDL, Hoch/Tief)</label>
-<label><input type="checkbox" id="hz"> Zonen höherer Zeiteinheiten zeigen</label>
-<label><input type="checkbox" id="inv"> ungültige Zonen zeigen</label>
-<label><input type="checkbox" id="ag"> Zonen gegen den Trend ausblenden</label>
+<label><input type="checkbox" id="hz"> H1-Zonen im M5-Chart zeigen</label>
 <div class="list">
-<h2>Einstiege</h2>
-<div id="ent"></div>
-<h2>Auswertung (Ziel 1:1)</h2>
-<div id="stat"></div>
-<h2>Signale mit Ergebnis</h2>
-<div id="hist"></div>
-<h2>Test: Ausbruch M15 (Ziel 1:1)</h2>
-<div id="bstat"></div>
-<div id="bhist"></div>
-<h2>Test: Ausbruch + Retest (Limit, Ziel 1:2)</h2>
-<div id="rstat"></div>
-<div id="rhist"></div>
-<h2>Test: H1-Zone mit M5-Bestätigung</h2>
-<div id="hstat"></div>
-<div id="hhist"></div>
-<h2>Zonen</h2>
+<h2 id="zt">Zonen</h2>
 <div id="list"></div>
 </div>
 <script>
-let DATA=null,frame="M5";
-const ORDER=["M5","M15","H1"];
+let DATA=null,frame="M5",cur="gold",NC={M5:60,H1:60};
+const STEPS=[30,45,60,90,150];
+try{const s=localStorage.getItem("mk");if(s)cur=s;}catch(e){}
 const cv=document.getElementById("cv");
 const ctx=cv.getContext("2d");
-const ST={frisch:"Frisch",angetestet:"Angetestet",ungueltig:"Ungültig"};
-const TR={long:"Long (aufwärts)",short:"Short (abwärts)",neutral:"Neutral"};
+const ST={frisch:"Frisch",angetestet:"Angetestet"};
+const TR={long:"▲ Long",short:"▼ Short",neutral:"► Neutral"};
 const LC={pd:"251,146,60",day:"96,165,250"};
+
+function M(){
+  if(!DATA)return null;
+  return DATA.markets.find(m=>m.key===cur)||DATA.markets[0]||null;
+}
+function fx(v,m){return v.toFixed(m.dec>2?m.dec:(m.price>1000?1:2));}
 
 async function load(){
   try{
@@ -92,87 +81,80 @@ async function load(){
     DATA=await r.json();
     document.getElementById("upd").textContent=
       "Stand: "+new Date(DATA.updated).toLocaleString("de-DE");
-    document.getElementById("trend").textContent="H1-Trend: "+TR[DATA.trend||"neutral"];
     render();
-    loadOv();
   }catch(e){
     document.getElementById("upd").textContent="Daten konnten nicht geladen werden ("+e.message+")";
   }
 }
 
-async function loadOv(){
+function lastPrice(m){const cs=m.frames.M5.candles;return cs[cs.length-1].c;}
+
+function overview(){
   const el=document.getElementById("ov");
-  const rows=[];
-  if(DATA)rows.push({name:"Gold",trend:DATA.trend||"neutral"});
-  try{
-    const r=await fetch("trends.json?"+Date.now());
-    const t=await r.json();
-    (t.markets||[]).forEach(m=>rows.push(m));
-  }catch(e){}
-  const L={long:"▲ Long",short:"▼ Short",neutral:"► Neutral"};
-  el.innerHTML='<div style="color:#8b93a5;margin-bottom:2px">H1-Trend aller Märkte</div>'+rows.map(m=>
-    '<div class="o '+(m.trend||"neutral")+'"><span>'+m.name+'</span><b class="'+(m.trend||"neutral")+'">'+(L[m.trend]||L.neutral)+'</b></div>').join("");
-}
-
-function fblocks(f){
-  const showInv=document.getElementById("inv").checked;
-  const hideAg=document.getElementById("ag").checked;
-  return DATA.frames[f].blocks.filter(b=>
-    (showInv||b.status!=="ungueltig")&&(!hideAg||b.with));
-}
-
-function lastPrice(){
-  const cs=DATA.frames.M5.candles;
-  return cs[cs.length-1].c;
+  el.innerHTML=DATA.markets.map(m=>
+    '<div class="o '+m.trend+(m.key===M().key?' sel':'')+'" data-k="'+m.key+'"><span>'+m.name+
+    '<small>'+fx(m.price,m)+(m.stale?' (alt)':'')+'</small></span><b class="'+m.trend+'">'+TR[m.trend]+'</b></div>').join("");
 }
 
 function info(){
-  const last=lastPrice();
+  const m=M();
+  const last=lastPrice(m);
   const r=[];
-  ["H1","M15","M5"].forEach(f=>{
-    DATA.frames[f].blocks.forEach(b=>{
-      if(b.status!=="ungueltig"&&last>=b.lo&&last<=b.hi){
-        r.push(f+" "+(b.kind==="long"?"Long":"Short")+" "+b.lo.toFixed(2)+" - "+b.hi.toFixed(2));
+  ["H1","M5"].forEach(f=>{
+    m.frames[f].blocks.forEach(b=>{
+      if(last>=b.lo&&last<=b.hi){
+        r.push(f+" "+(b.kind==="long"?"Long":"Short")+" "+fx(b.lo,m)+" - "+fx(b.hi,m)+(b.fvg?" (FVG)":""));
       }
     });
   });
   document.getElementById("in").textContent=
     r.length?"Kurs liegt in: "+r.join(" · "):"Kurs liegt in keiner Zone";
-
-  const k=DATA.key||{};
+  const k=m.keyl||{};
   let h="";
   const num=v=>typeof v==="number"&&isFinite(v);
-  if(k.res&&num(k.res.p))h+='<span class="r">Widerstand '+k.res.p.toFixed(2)+' ('+(k.res.n||"")+', +'+(k.res.p-last).toFixed(1)+')</span>';
+  if(k.res&&num(k.res.p))h+='<span class="r">Widerstand '+fx(k.res.p,m)+' ('+k.res.n+')</span>';
   if(k.res&&k.sup&&num(k.res.p)&&num(k.sup.p))h+=" · ";
-  if(k.sup&&num(k.sup.p))h+='<span class="s">Support '+k.sup.p.toFixed(2)+' ('+(k.sup.n||"")+', -'+(last-k.sup.p).toFixed(1)+')</span>';
+  if(k.sup&&num(k.sup.p))h+='<span class="s">Support '+fx(k.sup.p,m)+' ('+k.sup.n+')</span>';
   document.getElementById("key").innerHTML=h;
 }
 
-function zone(b,cs,cw,W,padR,y,cl,name,dash){
-  const idx=cs.findIndex(c=>c.t>=b.t);
+function niceStep(range,n){
+  const raw=range/n;
+  const p=Math.pow(10,Math.floor(Math.log10(raw)));
+  const f=raw/p;
+  return (f<1.5?1:f<3.5?2:f<7.5?5:10)*p;
+}
+
+function zone(b,cs,cw,W,padR,y,cl,name,dash,m){
+  let idx=cs.findIndex(c=>c.t>=b.t);
   if(idx<0)return;
   const x0=idx*cw;
   const y1=cl(y(b.hi)),y2=cl(y(b.lo));
-  let col,a;
-  if(b.status==="ungueltig"){col="150,150,150";a=0.12}
-  else if(b.status==="angetestet"){col=b.kind==="long"?"34,197,94":"239,68,68";a=0.15}
-  else{col=b.kind==="long"?"34,197,94":"239,68,68";a=0.32}
-  const f=b.with?1:0.45;
+  const col=b.kind==="long"?"34,197,94":"239,68,68";
+  const a=b.status==="angetestet"?0.15:0.32;
+  const strong=b.with&&b.fvg;
+  const f=strong?1:0.4;
   const h=Math.max(2,y2-y1);
   ctx.fillStyle="rgba("+col+","+(a*(dash?0.7:1)*f)+")";
   ctx.fillRect(x0,y1,W-padR-x0,h);
-  ctx.strokeStyle="rgba("+col+","+(0.85*f)+")";
+  ctx.strokeStyle="rgba("+col+","+(0.9*f)+")";
   ctx.setLineDash(dash?[6,4]:[]);
-  ctx.lineWidth=dash?1.5:1;
+  ctx.lineWidth=strong?(dash?1.5:1.5):1;
   ctx.strokeRect(x0,y1,W-padR-x0,h);
   ctx.setLineDash([]);
   ctx.lineWidth=1;
-  if(name){
+  const label=(name?name+" ":"")+(b.fvg?"FVG":"");
+  if(label.trim()){
     ctx.fillStyle="rgba("+col+",1)";
     ctx.font="bold 11px sans-serif";
-    ctx.fillText(name,x0+4,y1+12);
+    ctx.fillText(label.trim(),Math.max(x0+4,4),y1+12);
     ctx.font="11px sans-serif";
   }
+}
+
+function visibleBlocks(m,f,t0){
+  // Zonen, die im sichtbaren Ausschnitt noch gelten; Beginn vor dem Ausschnitt -> am linken Rand starten
+  return m.frames[f].blocks.map(b=>Object.assign({},b,{t:Math.max(b.t,t0)}));
 }
 
 function draw(){
@@ -181,37 +163,43 @@ function draw(){
   cv.width=W*d;cv.height=H*d;
   ctx.setTransform(d,0,0,d,0,0);
   ctx.clearRect(0,0,W,H);
-  if(!DATA)return;
-  const cs=DATA.frames[frame].candles;
-  const lo=Math.min(...cs.map(c=>c.l));
-  const hi=Math.max(...cs.map(c=>c.h));
-  const padR=52,padT=10,padB=16;
+  const m=M();
+  if(!m)return;
+  const all=m.frames[frame].candles;
+  const cs=all.slice(-NC[frame]);
+  let lo=Math.min(...cs.map(c=>c.l));
+  let hi=Math.max(...cs.map(c=>c.h));
+  const pad=(hi-lo)*0.06||1;
+  lo-=pad;hi+=pad;
+  const padR=58,padT=10,padB=16;
   const cw=(W-padR)/cs.length;
   const y=p=>padT+(hi-p)/(hi-lo)*(H-padT-padB);
   const cl=v=>Math.max(padT,Math.min(H-padB,v));
+  const t0=cs[0].t;
 
   ctx.font="11px sans-serif";
-  ctx.fillStyle="#8b93a5";
-  ctx.strokeStyle="#1b2232";
-  for(let i=0;i<=5;i++){
-    const p=lo+(hi-lo)*i/5;
+  const step=niceStep(hi-lo,8);
+  const dec=step>=1?0:Math.min(5,Math.max(0,Math.ceil(-Math.log10(step))));
+  for(let p=Math.ceil(lo/step)*step;p<=hi;p+=step){
+    ctx.strokeStyle="#1b2232";
     ctx.beginPath();ctx.moveTo(0,y(p));ctx.lineTo(W-padR,y(p));ctx.stroke();
-    ctx.fillText(p.toFixed(0),W-padR+6,y(p)+4);
+    ctx.fillStyle="#8b93a5";
+    ctx.fillText(p.toFixed(dec),W-padR+6,y(p)+4);
   }
 
-  if(document.getElementById("hz").checked){
-    ORDER.slice(ORDER.indexOf(frame)+1).forEach(f=>{
-      fblocks(f).forEach(b=>{
-        if(b.hi<lo||b.lo>hi)return;
-        zone(b,cs,cw,W,padR,y,cl,f,true);
-      });
+  if(document.getElementById("hz").checked&&frame==="M5"){
+    visibleBlocks(m,"H1",t0).forEach(b=>{
+      if(b.hi<lo||b.lo>hi)return;
+      zone(b,cs,cw,W,padR,y,cl,"H1",true,m);
     });
   }
-
-  fblocks(frame).forEach(b=>zone(b,cs,cw,W,padR,y,cl,null,false));
+  visibleBlocks(m,frame,t0).forEach(b=>{
+    if(b.hi<lo||b.lo>hi)return;
+    zone(b,cs,cw,W,padR,y,cl,null,false,m);
+  });
 
   if(document.getElementById("lv").checked){
-    (DATA.levels||[]).forEach(l=>{
+    (m.levels||[]).forEach(l=>{
       if(!LC[l.k])return;
       if(l.p<lo||l.p>hi)return;
       const col=LC[l.k];
@@ -224,7 +212,7 @@ function draw(){
       ctx.fillStyle="rgba("+col+",1)";
       ctx.font="10px sans-serif";
       ctx.textAlign="right";
-      ctx.fillText(l.n+" "+l.p.toFixed(1),W-padR-4,yy-3);
+      ctx.fillText(l.n+" "+fx(l.p,m),W-padR-4,yy-3);
       ctx.textAlign="left";
       ctx.font="11px sans-serif";
     });
@@ -234,162 +222,65 @@ function draw(){
     const x=i*cw+cw/2;
     const up=c.c>=c.o;
     ctx.strokeStyle=ctx.fillStyle=up?"#2dd4bf":"#f87171";
+    ctx.lineWidth=cw>6?1.5:1;
     ctx.beginPath();ctx.moveTo(x,y(c.h));ctx.lineTo(x,y(c.l));ctx.stroke();
+    ctx.lineWidth=1;
     const top=y(Math.max(c.o,c.c));
     const hgt=Math.max(1,Math.abs(y(c.o)-y(c.c)));
-    ctx.fillRect(x-cw*0.35,top,cw*0.7,hgt);
-  });
-
-  (DATA.entries||[]).forEach(e=>{
-    let idx=-1;
-    for(let i=0;i<cs.length;i++){if(cs[i].t<=e.t)idx=i;}
-    if(idx<0)return;
-    const x=idx*cw+cw/2;
-    ctx.fillStyle="#facc15";
-    ctx.beginPath();
-    if(e.kind==="long"){
-      const yy=cl(y(cs[idx].l))+3;
-      ctx.moveTo(x,yy);ctx.lineTo(x-7,yy+12);ctx.lineTo(x+7,yy+12);
-    }else{
-      const yy=cl(y(cs[idx].h))-3;
-      ctx.moveTo(x,yy);ctx.lineTo(x-7,yy-12);ctx.lineTo(x+7,yy-12);
-    }
-    ctx.closePath();ctx.fill();
+    ctx.fillRect(x-cw*0.36,top,cw*0.72,hgt);
   });
 
   const last=cs[cs.length-1].c;
   ctx.fillStyle="#2b6cff";
   ctx.fillRect(W-padR,y(last)-9,padR,18);
   ctx.fillStyle="#fff";
-  ctx.fillText(last.toFixed(1),W-padR+4,y(last)+4);
+  ctx.fillText(fx(last,m),W-padR+4,y(last)+4);
 }
 
 function list(){
-  const el=document.getElementById("list");
-  const bl=fblocks(frame).slice().sort((a,b)=>b.t-a.t);
-  el.innerHTML=bl.map(b=>
-    '<div class="z '+b.kind+(b.with?'':' ag')+'"><div><b>'+(b.kind==="long"?"Long":"Short")+
-    '</b> '+b.lo.toFixed(2)+' - '+b.hi.toFixed(2)+
-    '<small>'+new Date(b.t*1000).toLocaleString("de-DE")+
-    (b.n>1?' · '+b.n+' Zonen zusammengefasst':'')+
-    (b.with?'':' · gegen Trend')+'</small></div>'+
+  const m=M();
+  document.getElementById("zt").textContent="Zonen "+m.name+" ("+frame+")";
+  const last=lastPrice(m);
+  const bl=m.frames[frame].blocks.slice().sort((a,b)=>Math.abs((a.lo+a.hi)/2-last)-Math.abs((b.lo+b.hi)/2-last));
+  document.getElementById("list").innerHTML=bl.map(b=>
+    '<div class="z '+b.kind+(b.with&&b.fvg?'':' ag')+'"><div><b>'+(b.kind==="long"?"Long":"Short")+
+    '</b> '+fx(b.lo,m)+' - '+fx(b.hi,m)+
+    '<small>'+new Date(b.t*1000).toLocaleString("de-DE")+' · FVG '+(b.fvg?'✓':'✗')+' · '+(b.with?'im Trend':'gegen Trend')+'</small></div>'+
     '<div class="st">'+ST[b.status]+'</div></div>'
   ).join("")||"<p>Keine Zonen</p>";
-
-  const en=document.getElementById("ent");
-  const es=(DATA.entries||[]).slice().sort((a,b)=>b.t-a.t).slice(0,10);
-  en.innerHTML=es.map(e=>
-    '<div class="z e '+e.kind+'"><div><b>'+(e.kind==="long"?"Long":"Short")+
-    '-Einstieg</b> ca. '+e.price.toFixed(2)+(e.q?' · '+e.q.n+(e.q.v===2?'/4':'/3'):'')+
-    '<small>'+new Date(e.t*1000).toLocaleString("de-DE")+
-    ' · Zone '+e.lo.toFixed(2)+' - '+e.hi.toFixed(2)+'</small></div>'+
-    '<div class="st">Stop<br>'+e.stop.toFixed(2)+'</div></div>'
-  ).join("")||"<p>Noch keine Einstiege</p>";
-
-  const hs=DATA.history||[];
-  const w=hs.filter(h=>h.res==="Ziel").length;
-  const l=hs.filter(h=>h.res==="Stop").length;
-  const o=hs.length-w-l;
-  const rate=(a,b)=>(a+b)?Math.round(100*a/(a+b))+" %":"-";
-  const net=w-l;
-  const tw=hs.filter(h=>h.fit===true&&h.res==="Ziel").length;
-  const tl=hs.filter(h=>h.fit===true&&h.res==="Stop").length;
-  const aw=hs.filter(h=>h.fit===false&&h.res==="Ziel").length;
-  const al=hs.filter(h=>h.fit===false&&h.res==="Stop").length;
-  const qs=n=>hs.filter(h=>h.q&&h.q.v===2&&h.q.n>=n);
-  const qline=n=>{const a=qs(n);const x=a.filter(h=>h.res==="Ziel").length,y=a.filter(h=>h.res==="Stop").length;
-    return 'Mit mindestens '+n+' von 4 Prüfpunkten: '+x+' Ziel / '+y+' Stop ('+rate(x,y)+')';};
-  let extra="";
-  if(tw+tl+aw+al>0){
-    extra='<br>Mit H1-Trend: '+tw+' Ziel / '+tl+' Stop ('+rate(tw,tl)+')'+
-      '<br>Gegen den Trend: '+aw+' Ziel / '+al+' Stop ('+rate(aw,al)+')';
-  }
-  if(hs.some(h=>h.q&&h.q.v===2)){extra+='<br>(neue Prüfung mit Sweep, '+hs.filter(h=>h.q&&h.q.v===2).length+' Signale)<br>'+qline(1)+'<br>'+qline(2)+'<br>'+qline(3)+'<br>'+qline(4);}
-  document.getElementById("stat").innerHTML=hs.length?
-    '<div class="z"><div><b>'+w+' Ziel · '+l+' Stop · '+o+' offen oder unklar</b>'+
-    '<small>Trefferquote '+rate(w,l)+' · Ergebnis '+(net>=0?'+':'')+net+' R (1 R = dein Risiko, ohne Spanne und Kosten)'+extra+'</small></div></div>':
-    "<p>Noch keine Signale</p>";
-
-  const bk=DATA.brk_stat;
-  const bkTxt=bk?('Radar: Kurs '+bk.close+' · Ausbruch bei Schluss über '+bk.hh+' (Long) oder unter '+bk.ll+' (Short) · H1-Trend '+(TR[bk.trend]||bk.trend)+
-    '<br>Letzte 24 Std.: '+bk.raw24+' Ausbrüche, davon '+bk.ok24+' im Trend (= Signale)'):"";
-  const RL2={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
-  const RC2={Ziel:"win",Stop:"loss",offen:"open",unklar:"unk"};
-  const bs=DATA.brk_history||[];
-  const bwin=bs.filter(h=>h.res==="Ziel").length;
-  const bloss=bs.filter(h=>h.res==="Stop").length;
-  document.getElementById("bstat").innerHTML=bs.length?
-    '<div class="z"><div><b>'+bwin+' Ziel · '+bloss+' Stop · '+(bs.length-bwin-bloss)+' offen oder unklar</b>'+
-    '<small>Trefferquote '+rate(bwin,bloss)+' · Ergebnis '+((bwin-bloss)>=0?'+':'')+(bwin-bloss)+' R ohne Spanne. Testphase: erst nach 80 bis 100 Signalen aussagekräftig.</small></div></div>':
-    "<p>Noch keine Ausbruch-Signale<br><small style='color:#8b93a5'>"+bkTxt+"</small></p>";
-  document.getElementById("bhist").innerHTML=bs.slice(0,30).map(h=>
-    '<div class="z h '+RC2[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
-    '</b> Einstieg '+h.price.toFixed(2)+
-    '<small>Stop '+h.stop.toFixed(2)+' · Ziel '+h.target.toFixed(2)+'<br>'+
-    new Date((h.t+60)*1000).toLocaleString("de-DE")+
-    '</small></div><div class="st"><b>'+RL2[h.res]+'</b></div></div>'
-  ).join("");
-
-  const rs=DATA.rt_history||[];
-  const rw=rs.filter(h=>h.res==="Ziel").length;
-  const rl=rs.filter(h=>h.res==="Stop").length;
-  const rv=rs.filter(h=>h.st==="verfallen").length;
-  const rp=rs.filter(h=>h.st==="wartet").length;
-  document.getElementById("rstat").innerHTML=rs.length?
-    '<div class="z"><div><b>'+rw+' Ziel · '+rl+' Stop · '+rp+' wartet · '+rv+' verfallen</b>'+
-    '<small>Trefferquote '+rate(rw,rl)+' · Ergebnis '+((2*rw-rl)>=0?'+':'')+(2*rw-rl)+' R (Ziel = +2 R, Stop = -1 R, ohne Spanne). Nur ausgelöste Limits zählen.</small></div></div>':
-    "<p>Noch keine Signale<br><small style='color:#8b93a5'>"+bkTxt+"</small></p>";
-  const RTL=h=>h.res==="Ziel"?"Ziel erreicht":h.res==="Stop"?"Stop erreicht":h.st==="ausgelöst"?"ausgelöst, offen":h.st==="wartet"?"wartet auf Retest":"verfallen";
-  const RTC=h=>h.res==="Ziel"?"win":h.res==="Stop"?"loss":h.st==="verfallen"?"unk":"open";
-  document.getElementById("rhist").innerHTML=rs.slice(0,30).map(h=>
-    '<div class="z h '+RTC(h)+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
-    '</b> Limit bei '+h.price.toFixed(2)+
-    '<small>Stop '+h.stop.toFixed(2)+' · Ziel 1:2 '+h.target.toFixed(2)+'<br>'+
-    new Date(h.t*1000).toLocaleString("de-DE")+'</small></div><div class="st"><b>'+RTL(h)+'</b></div></div>'
-  ).join("");
-
-  const hz=DATA.h1_history||[];
-  const cnt=(k,v)=>hz.filter(h=>h[k]===v).length;
-  const hw1=cnt("res","Ziel"),hl1=cnt("res","Stop"),hw2=cnt("res2","Ziel"),hl2=cnt("res2","Stop");
-  document.getElementById("hstat").innerHTML=hz.length?
-    '<div class="z"><div><b>'+hz.length+' Signale</b>'+
-    '<small>Ziel 1:1: '+hw1+' Ziel / '+hl1+' Stop ('+rate(hw1,hl1)+') · '+((hw1-hl1)>=0?'+':'')+(hw1-hl1)+' R<br>'+
-    'Ziel 1:2: '+hw2+' Ziel / '+hl2+' Stop ('+rate(hw2,hl2)+') · '+((2*hw2-hl2)>=0?'+':'')+(2*hw2-hl2)+' R<br>ohne Spanne. Erst nach vielen Signalen aussagekräftig.</small></div></div>':
-    "<p>Noch keine Signale (H1-Zonen werden selten angetippt)</p>";
-  const HRL=r=>({Ziel:"Ziel",Stop:"Stop",offen:"offen",unklar:"unklar"}[r]);
-  document.getElementById("hhist").innerHTML=hz.slice(0,30).map(h=>
-    '<div class="z h '+RC2[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
-    '</b> Einstieg '+h.price.toFixed(2)+
-    '<small>H1-Zone '+h.lo.toFixed(2)+' - '+h.hi.toFixed(2)+' · Stop '+h.stop.toFixed(2)+'<br>Ziel 1:1 '+h.target.toFixed(2)+' ('+HRL(h.res)+') · Ziel 1:2 '+(h.target2||0).toFixed(2)+' ('+HRL(h.res2)+')<br>'+
-    new Date((h.t+60)*1000).toLocaleString("de-DE")+'</small></div></div>'
-  ).join("");
-
-  const RL={Ziel:"Ziel erreicht",Stop:"Stop erreicht",offen:"offen",unklar:"unklar"};
-  const RC={Ziel:"win",Stop:"loss",offen:"open",unklar:"unk"};
-  document.getElementById("hist").innerHTML=hs.slice(0,30).map(h=>
-    '<div class="z h '+RC[h.res]+'"><div><b>'+(h.kind==="long"?"Long":"Short")+
-    '</b> Einstieg '+h.price.toFixed(2)+(h.q?' · '+h.q.n+(h.q.v===2?'/4':'/3'):'')+
-    '<small>Stop '+h.stop.toFixed(2)+' · Ziel 1:1 '+h.target.toFixed(2)+(h.q?'<br>FVG '+(h.q.f?'✓':'✗')+' · H1-Trend '+(h.q.t?'✓':'✗')+' · H1-Zone '+(h.q.z?'✓':'✗')+(h.q.v===2?' · Sweep '+(h.q.s?'✓ '+h.q.s:'✗'):''):'')+'<br>'+
-    new Date(h.t*1000).toLocaleString("de-DE")+
-    (h.rt?' → '+new Date(h.rt*1000).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}):'')+
-    '</small></div><div class="st"><b>'+RL[h.res]+'</b></div></div>'
-  ).join("")||"<p>Noch keine Signale</p>";
 }
 
 function render(){
+  if(!DATA||!DATA.markets||!DATA.markets.length)return;
   let err="";
-  [draw,list,info].forEach(f=>{try{f();}catch(e){err+=" "+f.name+": "+e.message;console.error(e);}});
+  [overview,info,list,draw].forEach(f=>{try{f();}catch(e){err+=" "+f.name+": "+e.message;console.error(e);}});
   if(err)document.getElementById("upd").textContent+=" · Anzeigefehler:"+err;
 }
 
 document.getElementById("tabs").addEventListener("click",e=>{
-  if(e.target.dataset.f){
-    frame=e.target.dataset.f;
-    document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b===e.target));
+  const t=e.target;
+  if(t.dataset.f){
+    frame=t.dataset.f;
+    document.querySelectorAll("#tabs button[data-f]").forEach(b=>b.classList.toggle("on",b===t));
     render();
   }
 });
-["lv","hz","inv","ag"].forEach(id=>document.getElementById(id).addEventListener("change",render));
+function zoom(dir){
+  let i=STEPS.indexOf(NC[frame]);if(i<0)i=2;
+  i=Math.max(0,Math.min(STEPS.length-1,i+dir));
+  NC[frame]=STEPS[i];
+  draw();
+}
+document.getElementById("zin").addEventListener("click",()=>zoom(-1));
+document.getElementById("zout").addEventListener("click",()=>zoom(1));
+document.getElementById("ov").addEventListener("click",e=>{
+  const o=e.target.closest(".o");
+  if(!o)return;
+  cur=o.dataset.k;
+  try{localStorage.setItem("mk",cur);}catch(err){}
+  render();
+});
+["lv","hz"].forEach(id=>document.getElementById(id).addEventListener("change",render));
 window.addEventListener("resize",draw);
 load();
 setInterval(load,60000);
