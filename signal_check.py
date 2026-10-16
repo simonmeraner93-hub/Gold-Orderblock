@@ -16,6 +16,8 @@ BASE = "https://demo-api-capital.backend-capital.com/api/v1"
 REF_PRICE = 4160.0
 GAP_BASE = {"M5": 1.0, "H1": 4.0}
 STRONG = 1.5
+FVG_MIN = 0.25    # Fair Value Gap muss mindestens so gross sein wie dieser Anteil der durchschnittlichen Kerzenkoerper
+ADJACENT = True   # Orderblock muss die Kerze direkt vor dem Impuls sein (dann hängt das FVG am Block)
 SWING = 10
 SHOW = 150
 WINDOW_MIN = 30
@@ -194,6 +196,12 @@ def find_blocks(df):
                 fvg = bool(df.iloc[i + 1].low > df.iloc[i - 1].high)
             else:
                 fvg = bool(df.iloc[i + 1].high < df.iloc[i - 1].low)
+            if fvg:
+                avg_b = float(body.iloc[max(0, i - 20):i].mean())
+                size = (float(df.iloc[i + 1].low - df.iloc[i - 1].high) if kind == "long"
+                        else float(df.iloc[i - 1].low - df.iloc[i + 1].high))
+                if size < FVG_MIN * avg_b:
+                    fvg = False
         fl = fh = ft = None
         filled = False
         if known and fvg:
@@ -209,7 +217,7 @@ def find_blocks(df):
         result.append({
             "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
             "t": int(df.iloc[k].time.timestamp()), "status": status,
-            "fvg": fvg, "fvg_known": known,
+            "fvg": fvg, "fvg_known": known, "adj": k == i - 1,
             "fvg_lo": fl, "fvg_hi": fh, "fvg_t": ft, "fvg_filled": filled,
         })
     return result
@@ -310,6 +318,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
             for b in blocks[tf]:
                 if b["status"] == "ungueltig":
                     continue
+                if ADJACENT and not b["adj"]:
+                    continue
                 if trend != "neutral" and b["kind"] != trend:
                     continue
                 if b["fvg_known"] and not b["fvg"]:
@@ -356,6 +366,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         first_t = int(shown.iloc[0].time.timestamp())
         vis = [b for b in blocks[tf]
                if b["t"] >= first_t and b["status"] != "ungueltig"
+               and (b["adj"] or not ADJACENT)
                and (b["fvg"] or not b["fvg_known"])]
         zones = []
         for b in vis:
