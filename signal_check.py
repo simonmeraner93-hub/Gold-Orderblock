@@ -1,3 +1,11 @@
+"""Orderblock-Radar fuer mehrere Maerkte.
+
+Telegram nur bei neuen Orderblöcken (M5 und H1), die
+ - in Richtung des H1-Trends liegen (bei neutralem Trend beide Richtungen) und
+ - ein Fair Value Gap haben (ist es noch nicht bekannt: Meldung mit Fragezeichen,
+   ist es bekannt und nicht vorhanden: keine Meldung).
+Schreibt ausserdem docs/data.json fuer die App.
+"""
 import os
 import json
 from datetime import datetime, timedelta, timezone
@@ -5,25 +13,24 @@ import requests
 import pandas as pd
 
 BASE = "https://demo-api-capital.backend-capital.com/api/v1"
-EPIC = "GOLD"
-FRAMES = {"M5": "MINUTE_5", "M15": "MINUTE_15", "H1": "HOUR"}
-GAP = {"M5": 1.0, "M15": 2.0, "H1": 4.0}
+REF_PRICE = 4160.0
+GAP_BASE = {"M5": 1.0, "H1": 4.0}
 STRONG = 1.5
 SWING = 10
-SHOW = 120
-STOP_PUFFER = 0.5
+SHOW = 150
 WINDOW_MIN = 30
-APP_ENTRY_HOURS = 6
-HISTORY_DAYS = 14
 STATE_FILE = "sent.json"
 SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
-BRK_LOOK = 20
-BRK_ATR = 1.5
-BRK_COOLDOWN = 6
-BRK_BACKFILL_H = 20
-H1_CHOCH_BARS = 12
-RT_BARS = 36
-RT_FAIL = 0.5
+
+# key, Name, moegliche Epics, Nachkommastellen, Abstand der runden Marken
+MARKETS = [
+    ("gold", "Gold", ["GOLD"], 2, 50),
+    ("us500", "S&P 500", ["US500"], 2, 100),
+    ("us100", "Nasdaq 100", ["US100"], 2, 500),
+    ("eurusd", "EUR/USD", ["EURUSD"], 5, 0.01),
+    ("gbpusd", "GBP/USD", ["GBPUSD"], 5, 0.01),
+    ("dax", "DAX", ["DE40", "GER40", "DAX40"], 2, 500),
+]
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
@@ -69,9 +76,9 @@ def login():
     }
 
 
-def get_candles(h, resolution):
+def get_candles(h, epic, resolution):
     r = requests.get(
-        f"{BASE}/prices/{EPIC}",
+        f"{BASE}/prices/{epic}",
         headers=h,
         params={"resolution": resolution, "max": 300},
         timeout=15,
@@ -102,23 +109,20 @@ def get_trend(h1):
     return "neutral"
 
 
-def calc_levels(h1, last):
+def calc_levels(h1, last, step, dec):
     df = h1.copy()
     df["date"] = df.time.dt.date
     df["hour"] = df.time.dt.hour
     today = df.date.iloc[-1]
     levels = []
-
     prev = [d for d in df.date.unique() if d < today]
     if prev:
         p = df[df.date == prev[-1]]
         levels.append({"n": "PDH", "p": float(p.high.max()), "k": "pd"})
         levels.append({"n": "PDL", "p": float(p.low.min()), "k": "pd"})
-
     t = df[df.date == today]
     levels.append({"n": "Tageshoch", "p": float(t.high.max()), "k": "day"})
     levels.append({"n": "Tagestief", "p": float(t.low.min()), "k": "day"})
-
     for name, s, e in SESSIONS:
         sel = df[(df.hour >= s) & (df.hour < e)]
         if sel.empty:
@@ -127,19 +131,18 @@ def calc_levels(h1, last):
         w = sel[sel.date == d]
         levels.append({"n": f"{name} Hoch", "p": float(w.high.max()), "k": "sess"})
         levels.append({"n": f"{name} Tief", "p": float(w.low.min()), "k": "sess"})
-
-    base = int(last // 50) * 50
+    base = (last // step) * step
     for k in range(-2, 4):
-        p = base + 50 * k
-        if abs(p - last) <= 100:
-            levels.append({"n": f"Marke {p}", "p": float(p), "k": "round"})
-
+        p = base + step * k
+        if abs(p - last) <= 2 * step:
+            levels.append({"n": f"Marke {round(p, dec)}", "p": float(p), "k": "round"})
     for l in levels:
-        l["p"] = round(l["p"], 2)
+        l["p"] = round(l["p"], dec)
     return levels
 
 
 def find_blocks(df):
+    """Orderblöcke: starke Impulskerze + letzte Gegenkerze davor."""
     body = (df["close"] - df["open"]).abs()
     found = {}
     for i in range(SWING + 20, len(df)):
@@ -184,15 +187,17 @@ def find_blocks(df):
                     break
                 if c.high >= lo:
                     status = "angetestet"
+        known = i + 1 < len(df)          # Folgekerze schon geschlossen?
         fvg = False
-        if i >= 1 and i + 1 < len(df):
+        if known:
             if kind == "long":
                 fvg = bool(df.iloc[i + 1].low > df.iloc[i - 1].high)
             else:
                 fvg = bool(df.iloc[i + 1].high < df.iloc[i - 1].low)
         result.append({
             "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
-            "t": int(df.iloc[k].time.timestamp()), "status": status, "fvg": fvg,
+            "t": int(df.iloc[k].time.timestamp()), "status": status,
+            "fvg": fvg, "fvg_known": known,
         })
     return result
 
@@ -211,6 +216,7 @@ def merge(blocks, gap):
                 cur["lo"] = min(cur["lo"], b["lo"])
                 cur["t"] = min(cur["t"], b["t"])
                 cur["n"] += 1
+                cur["fvg"] = cur["fvg"] or b["fvg"]
                 if b["status"] == "angetestet":
                     cur["status"] = "angetestet"
             else:
@@ -220,97 +226,30 @@ def merge(blocks, gap):
                 cur["n"] = 1
         if cur is not None:
             result.append(cur)
-    for b in blocks:
-        if b["status"] == "ungueltig":
-            x = dict(b)
-            x["n"] = 1
-            result.append(x)
     return result
 
 
-def find_entries(m5, m1, blocks):
-    entries = []
-    for b in blocks:
-        i = b["i"]
-        lo, hi = b["lo"], b["hi"]
-        is_long = b["kind"] == "long"
-        touched = False
-        invalid = False
-        for j in range(i + 1, len(m5)):
-            c = m5.iloc[j]
-            inv = (c.close < lo) if is_long else (c.close > hi)
-            tch = (c.low <= hi) if is_long else (c.high >= lo)
-            if inv:
-                invalid = True
-                break
-            if tch:
-                touched = True
-                break
-        if invalid or not touched:
-            continue
-
-        start = m5.iloc[i].time + timedelta(minutes=5)
-        m = m1[m1.time >= start].reset_index(drop=True)
-        if len(m) < 10:
-            continue
-        t = None
-        for idx in range(len(m)):
-            c = m.iloc[idx]
-            hit = (c.low <= hi) if is_long else (c.high >= lo)
-            if hit:
-                t = idx
-                break
-        if t is None:
-            continue
-
-        w = m.iloc[max(t - 5, 0):t + 1]
-        ref = w.high.max() if is_long else w.low.min()
-        for idx in range(t + 1, min(t + 61, len(m))):
-            c = m.iloc[idx]
-            broke = (c.close < lo) if is_long else (c.close > hi)
-            if broke:
-                break
-            choch = (c.close > ref) if is_long else (c.close < ref)
-            if choch:
-                stop = lo - STOP_PUFFER if is_long else hi + STOP_PUFFER
-                entries.append({
-                    "kind": b["kind"],
-                    "bt": b["t"],
-                    "k": int(b["k"]),
-                    "i": int(b["i"]),
-                    "t": int(c.time.timestamp()),
-                    "price": round(float(c.close), 2),
-                    "stop": round(float(stop), 2),
-                    "lo": round(lo, 2),
-                    "hi": round(hi, 2),
-                    "fvg": bool(b.get("fvg", False)),
-                })
-                break
-    return entries
-
-
-def sweep_info(m5, e, levels):
-    """Liquiditaets-Sweep: vor/waehrend der Zonenbildung wurde ein frueheres Tief (Long) bzw. Hoch (Short)
-    unterboten und der Kurs ist danach wieder zurueckgekehrt. Es zaehlen nur Niveaus, die es VOR dem Sweep gab."""
-    k, i = e.get("k"), e.get("i")
-    if k is None or i is None or k < 2 or i >= len(m5):
+def sweep_info(df, b, levels, unit2):
+    """Liquiditaets-Sweep vor/waehrend der Zonenbildung."""
+    k, i = b["k"], b["i"]
+    if k < 2 or i >= len(df):
         return None
-    is_long = e["kind"] == "long"
-    win = m5.iloc[max(k - 1, 0):i + 1]
-    close_i = float(m5.iloc[i].close)
+    is_long = b["kind"] == "long"
+    win = df.iloc[max(k - 1, 0):i + 1]
+    close_i = float(df.iloc[i].close)
     cands = []
-    for n_bars, label in ((20, "Tief/Hoch der letzten 20 Kerzen"), (48, "Tief/Hoch der letzten 4 Std.")):
-        prior = m5.iloc[max(0, k - 1 - n_bars):max(k - 1, 0)]
+    for n_bars, label in ((20, "letzten 20 Kerzen"), (48, unit2)):
+        prior = df.iloc[max(0, k - 1 - n_bars):max(k - 1, 0)]
         if len(prior) < 10:
             continue
         if is_long:
             lvl = float(prior.low.min())
             if float(win.low.min()) < lvl < close_i:
-                cands.append((lvl, label.replace("Tief/Hoch", "Tief")))
+                cands.append((lvl, "Tief der " + label))
         else:
             lvl = float(prior.high.max())
             if float(win.high.max()) > lvl > close_i:
-                cands.append((lvl, label.replace("Tief/Hoch", "Hoch")))
+                cands.append((lvl, "Hoch der " + label))
     for l in levels:
         if l["n"] == ("PDL" if is_long else "PDH"):
             if is_long and float(win.low.min()) < l["p"] < close_i:
@@ -319,548 +258,136 @@ def sweep_info(m5, e, levels):
                 cands.append((l["p"], "Vortageshoch"))
     if not cands:
         return None
-    best = max(cands) if is_long else min(cands)
-    return best[1]
+    return (max(cands) if is_long else min(cands))[1]
 
 
-def quality(e, trend, h1_blocks, m5=None, levels=None):
-    """Vier Pruefpunkte wie bei TraderJe: Fair Value Gap, H1-Trend, Zone in H1-Zone, Liquiditaets-Sweep."""
-    fvg = bool(e.get("fvg"))
-    fit = e["kind"] == trend
-    h1z = any(
-        b["kind"] == e["kind"] and b["status"] != "ungueltig"
-        and b["lo"] <= e["hi"] and b["hi"] >= e["lo"]
-        for b in h1_blocks
-    )
-    sw = sweep_info(m5, e, levels or []) if m5 is not None else None
-    return {"f": fvg, "t": fit, "z": h1z, "s": sw, "v": 2,
-            "n": int(fvg) + int(fit) + int(h1z) + int(sw is not None)}
+TRTXT = {"long": "Long (aufwärts)", "short": "Short (abwärts)", "neutral": "Neutral"}
 
 
-def qtext(q, with_zone=True):
-    """Prueftext fuer Telegram. q["f"] None = Fair Value Gap noch nicht bekannt (Folgekerze fehlt)."""
-    sw = q.get("s")
-    fvg = q.get("f")
-    parts = [f"Fair Value Gap {'?' if fvg is None else ('✓' if fvg else '✗')}",
-             f"H1-Trend {'✓' if q['t'] else '✗'}"]
-    n = int(bool(fvg)) + int(q["t"]) + (1 if sw is not None else 0)
-    if with_zone:
-        parts.append(f"in H1-Zone {'✓' if q['z'] else '✗'}")
-        n += int(q["z"])
-    parts.append("Liquidity-Sweep " + (f"✓ ({sw})" if sw is not None else "✗"))
-    total = 4 if with_zone else 3
-    return "Prüfung: " + " · ".join(parts) + f" ({n} von {total}" + (", FVG noch offen)" if fvg is None else ")")
-
-
-def find_h1_entries(m5, h1, h1_blocks):
-    """Test: Kurs tippt erstmals eine H1-Zone an, Einstieg nach Bestaetigung auf M5 (Schluss ueber/unter das Hoch/Tief der Beruehrungskerze)."""
-    out = []
-    if len(m5) < 30 or len(h1) < 5:
-        return out
-    m5_start = m5.time.iloc[0]
-    for b in h1_blocks:
-        i = b["i"]
-        if b["status"] == "ungueltig" or i + 1 >= len(h1):
-            continue
-        is_long = b["kind"] == "long"
-        lo, hi = b["lo"], b["hi"]
-        avail = h1.iloc[i + 1].time + pd.Timedelta(hours=1)
-        # schon vor dem M5-Fenster angetestet -> kein Ersttest mehr
-        pre = h1[(h1.time > h1.iloc[i + 1].time) & (h1.time + pd.Timedelta(hours=1) <= m5_start)]
-        if ((pre.low <= hi) if is_long else (pre.high >= lo)).any():
-            continue
-        seg = m5[m5.time >= max(avail, m5_start)].reset_index(drop=True)
-        touch = None
-        for j in range(len(seg)):
-            c = seg.iloc[j]
-            inv = (c.close < lo) if is_long else (c.close > hi)
-            tch = (c.low <= hi) if is_long else (c.high >= lo)
-            if inv:
-                break
-            if tch:
-                touch = j
-                break
-        if touch is None:
-            continue
-        ref = seg.iloc[touch].high if is_long else seg.iloc[touch].low
-        for k in range(touch + 1, min(touch + 1 + H1_CHOCH_BARS, len(seg))):
-            c = seg.iloc[k]
-            broke = (c.close < lo) if is_long else (c.close > hi)
-            if broke:
-                break
-            if (c.close > ref) if is_long else (c.close < ref):
-                price = float(c.close)
-                stop = lo - STOP_PUFFER if is_long else hi + STOP_PUFFER
-                risk = abs(price - stop)
-                if risk < 1.0:
-                    break
-                ct = int((c.time + pd.Timedelta(minutes=5)).timestamp())
-                out.append({
-                    "id": f"h1-{b['kind']}-{b['t']}", "kind": b["kind"], "ct": ct,
-                    "price": round(price, 2), "stop": round(stop, 2), "risk": round(risk, 2),
-                    "t1": round(price + risk if is_long else price - risk, 2),
-                    "t2": round(price + 2 * risk if is_long else price - 2 * risk, 2),
-                    "lo": round(lo, 2), "hi": round(hi, 2),
-                })
-                break
-    return out
-
-
-def load_history(key="history"):
-    try:
-        with open("docs/data.json") as f:
-            return json.load(f).get(key, [])
-    except Exception:
-        return []
-
-
-def breakout_signals(m15, h1):
-    """Test-Strategie: Ausbruch aus 20 M15-Kerzen in Richtung H1-Trend, Stop 1,5 ATR, Ziel 1:1."""
-    d = m15.copy()
-    prev = d.close.shift(1)
-    tr = pd.concat([d.high - d.low, (d.high - prev).abs(), (d.low - prev).abs()], axis=1).max(axis=1)
-    d["atr"] = tr.rolling(14).mean()
-    d["hh"] = d.high.shift(1).rolling(BRK_LOOK).max()
-    d["ll"] = d.low.shift(1).rolling(BRK_LOOK).min()
-    d["ct"] = d.time + pd.Timedelta(minutes=15)
-
-    t = h1.copy()
-    e20 = t.close.ewm(span=20, adjust=False).mean()
-    e50 = t.close.ewm(span=50, adjust=False).mean()
-    t["trend"] = "neutral"
-    t.loc[(e20 > e50) & (t.close > e50), "trend"] = "long"
-    t.loc[(e20 < e50) & (t.close < e50), "trend"] = "short"
-    t["avail"] = t.time + pd.Timedelta(hours=1)
-    d = pd.merge_asof(d.sort_values("ct"), t[["avail", "trend"]],
-                      left_on="ct", right_on="avail", direction="backward")
-
-    out = []
-    lastrow = d.iloc[-1]
-    cut24 = int(lastrow.ct.timestamp()) - 86400
-    stat = {"close": round(float(lastrow.close), 2),
-            "hh": None if pd.isna(lastrow.hh) else round(float(lastrow.hh), 2),
-            "ll": None if pd.isna(lastrow.ll) else round(float(lastrow.ll), 2),
-            "trend": None if pd.isna(lastrow.trend) else lastrow.trend,
-            "raw24": 0, "ok24": 0}
-    last = {"long": -999, "short": -999}
-    for i in range(BRK_LOOK + 15, len(d)):
-        r = d.iloc[i]
-        if pd.isna(r.atr) or pd.isna(r.hh) or pd.isna(r.trend):
-            continue
-        kind = None
-        if r.close > r.hh:
-            kind = "long"
-        elif r.close < r.ll:
-            kind = "short"
-        if kind is None or i - last[kind] < BRK_COOLDOWN:
-            continue
-        last[kind] = i
-        if int(r.ct.timestamp()) >= cut24:
-            stat["raw24"] += 1
-        if r.trend != kind:
-            continue
-        if int(r.ct.timestamp()) >= cut24:
-            stat["ok24"] += 1
-        price = float(r.close)
-        risk = BRK_ATR * float(r.atr)
-        if risk < 1.0:
-            continue
-        stop = price - risk if kind == "long" else price + risk
-        target = price + risk if kind == "long" else price - risk
-        out.append({
-            "kind": kind, "ct": int(r.ct.timestamp()),
-            "price": round(price, 2), "stop": round(stop, 2),
-            "target": round(target, 2), "risk": round(risk, 2),
-            "level": round(float(r.hh if kind == "long" else r.ll), 2),
-            "atr": round(float(r.atr), 3),
-        })
-    return out, stat
-
-
-def eval_retest(sig, m5):
-    """Ausbruch + Retest: Limit am durchbrochenen Niveau, Stop 1 ATR dahinter, Ziel 1:2."""
-    is_long = sig["kind"] == "long"
-    level, atr = sig["level"], sig["atr"]
-    stop = level - atr if is_long else level + atr
-    target = level + 2 * atr if is_long else level - 2 * atr
-    t0 = pd.Timestamp(sig["ct"], unit="s", tz="UTC")
-    seg = m5[m5.time >= t0].reset_index(drop=True)
-    if seg.empty:
-        return {"st": "wartet", "stop": round(stop, 2), "target": round(target, 2)}
-    fill = None
-    for j in range(min(RT_BARS, len(seg))):
-        r = seg.iloc[j]
-        touch = (r.low <= level) if is_long else (r.high >= level)
-        failed = (r.close < level - RT_FAIL * atr) if is_long else (r.close > level + RT_FAIL * atr)
-        if touch:
-            fill = j
+def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
+    order = ([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
+    epic, h1_full, m5_full, err = None, None, None, None
+    for ep in order:
+        try:
+            h1_full = get_candles(h, ep, "HOUR")
+            m5_full = get_candles(h, ep, "MINUTE_5")
+            epic = ep
             break
-        if failed:
-            return {"st": "verfallen", "stop": round(stop, 2), "target": round(target, 2)}
-    if fill is None:
-        st = "verfallen" if len(seg) >= RT_BARS else "wartet"
-        return {"st": st, "stop": round(stop, 2), "target": round(target, 2)}
-    ft = int(seg.iloc[fill].time.timestamp())
-    res, rt = "offen", None
-    for k in range(fill, len(seg)):
-        r = seg.iloc[k]
-        stop_hit = (r.low <= stop) if is_long else (r.high >= stop)
-        if stop_hit:
-            res, rt = "Stop", int(r.time.timestamp())
-            break
-        if k == fill:
-            continue
-        tgt_hit = (r.high >= target) if is_long else (r.low <= target)
-        if tgt_hit:
-            res, rt = "Ziel", int(r.time.timestamp())
-            break
-    return {"st": "ausgelöst", "ft": ft, "res": res, "rt": rt,
-            "stop": round(stop, 2), "target": round(target, 2)}
+        except Exception as e:
+            err = e
+    if epic is None:
+        raise RuntimeError(f"kein Epic gefunden ({cands}): {err}")
 
+    h1c = h1_full.iloc[:-1].reset_index(drop=True)
+    m5c = m5_full.iloc[:-1].reset_index(drop=True)
+    if len(h1c) < 60 or len(m5c) < 60:
+        raise RuntimeError("zu wenige Kerzen")
+    trend = get_trend(h1c)
+    last = float(m5c.close.iloc[-1])
+    levels = calc_levels(h1_full, last, step, dec)
+    scale = last / REF_PRICE
 
-def evaluate_entry(h, m1, m5):
-    t_close = pd.Timestamp(h["t"] + 60, unit="s", tz="UTC")
-    if len(m1) and m1.time.iloc[0] <= t_close:
-        series = m1[m1.time >= t_close]
-    else:
-        series = m5[m5.time >= t_close.ceil("5min")]
-    is_long = h["kind"] == "long"
-    for r in series.itertuples():
-        if is_long:
-            stop_hit = r.low <= h["stop"]
-            tgt_hit = r.high >= h["target"]
-        else:
-            stop_hit = r.high >= h["stop"]
-            tgt_hit = r.low <= h["target"]
-        if stop_hit:
-            return "Stop", int(r.time.timestamp())
-        if tgt_hit:
-            return "Ziel", int(r.time.timestamp())
-    return "offen", None
+    dfs = {"M5": (m5c, m5_full, 5), "H1": (h1c, h1_full, 60)}
+    blocks = {tf: find_blocks(dfs[tf][0]) for tf in dfs}
+    valid_h1 = [b for b in blocks["H1"] if b["status"] != "ungueltig"]
+
+    # ---- Telegram ----
+    if notify_ok:
+        for tf, (df, _, mins) in dfs.items():
+            for b in blocks[tf]:
+                if b["status"] == "ungueltig":
+                    continue
+                if trend != "neutral" and b["kind"] != trend:
+                    continue
+                if b["fvg_known"] and not b["fvg"]:
+                    continue
+                close_t = df.iloc[b["i"]].time + timedelta(minutes=mins)
+                if close_t < cutoff:
+                    continue
+                skey = f"{epic}-{tf}-{b['kind']}-{b['t']}"
+                if key == "gold" and tf == "M5":
+                    skey = f"{b['kind']}-{b['t']}-new"
+                if skey in state:
+                    continue
+                long_ = b["kind"] == "long"
+                icon = "🟢" if long_ else "🔴"
+                fv = "✓" if b["fvg"] else "? (Folgekerze fehlt noch)"
+                sw = sweep_info(df, b, levels, "letzten 4 Std." if tf == "M5" else "letzten 2 Tage")
+                swt = f"✓ ({sw})" if sw else "✗"
+                lines = [
+                    f"{icon} {name.upper() if key == 'gold' else name}: Neuer {'Long' if long_ else 'Short'}-Orderblock ({tf})",
+                    f"Zone: {b['lo']:.{dec}f} - {b['hi']:.{dec}f}",
+                    f"H1-Trend: {TRTXT[trend]} · Fair Value Gap: {fv}",
+                ]
+                if tf == "M5":
+                    h1z = any(
+                        x["kind"] == b["kind"] and x["lo"] <= b["hi"] and x["hi"] >= b["lo"]
+                        for x in valid_h1
+                    )
+                    lines.append(f"in H1-Zone: {'✓' if h1z else '✗'} · Liquidity-Sweep: {swt}")
+                else:
+                    lines.append(f"Liquidity-Sweep: {swt}")
+                tg("\n".join(lines))
+                state[skey] = now.timestamp()
+
+    # ---- App-Daten ----
+    above = [l for l in levels if l["p"] > last]
+    below = [l for l in levels if l["p"] < last]
+    keyl = {
+        "res": min(above, key=lambda l: l["p"]) if above else None,
+        "sup": max(below, key=lambda l: l["p"]) if below else None,
+    }
+    frames = {}
+    for tf, (df, full, mins) in dfs.items():
+        shown = full.iloc[-SHOW:]
+        first_t = int(shown.iloc[0].time.timestamp())
+        vis = [b for b in blocks[tf] if b["t"] >= first_t]
+        merged = merge(vis, GAP_BASE[tf] * scale)
+        zones = [{
+            "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
+            "t": b["t"], "status": b["status"], "n": b["n"],
+            "fvg": bool(b["fvg"]),
+            "with": trend == "neutral" or b["kind"] == trend,
+        } for b in merged]
+        candles = [{
+            "t": int(r.time.timestamp()),
+            "o": round(float(r.open), dec), "h": round(float(r.high), dec),
+            "l": round(float(r.low), dec), "c": round(float(r.close), dec),
+        } for r in shown.itertuples()]
+        frames[tf] = {"candles": candles, "blocks": zones}
+    return {
+        "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend,
+        "price": round(last, dec), "levels": levels, "keyl": keyl, "frames": frames,
+    }
 
 
 def main():
     now = datetime.now(timezone.utc)
-    state = load_state()
     cutoff = now - timedelta(minutes=WINDOW_MIN)
-
+    notify_ok = now.weekday() < 5
+    state = load_state()
+    try:
+        with open("docs/data.json") as f:
+            old = {m["key"]: m for m in json.load(f).get("markets", [])}
+    except Exception:
+        old = {}
     h = login()
-    full = {n: get_candles(h, r) for n, r in FRAMES.items()}
-    m1 = get_candles(h, "MINUTE").iloc[:-1].reset_index(drop=True)
-    closed = {n: d.iloc[:-1].reset_index(drop=True) for n, d in full.items()}
-    trend = get_trend(closed["H1"])
-
-    m5 = closed["M5"]
-    last = float(m5.close.iloc[-1])
-    levels = calc_levels(full["H1"], last)
-    above = [l for l in levels if l["p"] > last]
-    below = [l for l in levels if l["p"] < last]
-    key = {
-        "res": min(above, key=lambda l: l["p"]) if above else None,
-        "sup": max(below, key=lambda l: l["p"]) if below else None,
-    }
-    blocks5 = find_blocks(m5)
-    ents5 = find_entries(m5, m1, blocks5)
-    seen_e, uniq = set(), []
-    for e in sorted(ents5, key=lambda x: (x["t"], x["bt"])):
-        k = (e["kind"], e["t"])
-        if k in seen_e:
-            continue
-        seen_e.add(k)
-        uniq.append(e)
-    ents5 = uniq
-    h1_blocks = find_blocks(closed["H1"])
-    for e in ents5:
-        e["q"] = quality(e, trend, h1_blocks, m5, levels)
-
-    def notify(key, text):
-        if key in state:
-            return
-        # Nur neue Orderblöcke werden gemeldet, alles andere bleibt still
-        if key.endswith("-new"):
-            tg(text)
-        state[key] = now.timestamp()
-
-    def close5(i):
-        return m5.iloc[i].time + timedelta(minutes=5)
-
-    if now.weekday() < 5:
-        for b in blocks5:
-            kind, i, bt = b["kind"], b["i"], b["t"]
-            lo, hi = b["lo"], b["hi"]
-            is_long = kind == "long"
-            zone = f"{lo:.2f} - {hi:.2f}"
-            name = "Long" if is_long else "Short"
-            icon = "🟢" if is_long else "🔴"
-
-            if close5(i) >= cutoff:
-                qq = quality(b, trend, h1_blocks, m5, levels)
-                if i + 1 >= len(m5):
-                    qq["f"] = None
-                notify(f"{kind}-{bt}-new",
-                       f"{icon} GOLD: Neuer {name}-Orderblock (M5)\nZone: {zone}\n{qtext(qq)}")
-
-            touched = False
-            for j in range(i + 1, len(m5)):
-                c = m5.iloc[j]
-                inv = (c.close < lo) if is_long else (c.close > hi)
-                tch = (c.low <= hi) if is_long else (c.high >= lo)
-                if inv:
-                    if close5(j) >= cutoff:
-                        notify(f"{kind}-{bt}-invalid",
-                               f"❌ {name}-Orderblock ungültig\nZone: {zone}")
-                    break
-                if tch and not touched:
-                    touched = True
-                    if close5(j) >= cutoff:
-                        notify(f"{kind}-{bt}-touch",
-                               f"⚡ {name}-Orderblock zum ersten Mal angetestet\nZone: {zone}")
-
-        trend_name = {"long": "Long", "short": "Short", "neutral": "Neutral"}[trend]
-        for e in ents5:
-            if e["t"] + 60 < cutoff.timestamp():
-                continue
-            is_long = e["kind"] == "long"
-            name = "Long" if is_long else "Short"
-            risk = abs(e["price"] - e["stop"])
-            if risk <= 0:
-                continue
-            cands = sorted(
-                [l for l in levels
-                 if (l["p"] > e["price"] if is_long else l["p"] < e["price"])],
-                key=lambda l: abs(l["p"] - e["price"]),
-            )
-            tline = "Ziel: offen (kein Level mit CRV 1:1)"
-            for l in cands:
-                rew = abs(l["p"] - e["price"])
-                if rew >= risk:
-                    tline = f"Ziel: {l['p']:.2f} ({l['n']}, CRV 1:{rew / risk:.1f})"
-                    break
-            fits = trend == "neutral" or e["kind"] == trend
-            tr = "passt" if fits else "GEGEN den Trend"
-            q = e["q"]
-            mk = lambda v: "✓" if v else "✗"
-            sw_txt = f"✓ ({q['s']})" if q.get("s") else "✗"
-            qline = (f"Prüfung: Fair Value Gap {mk(q['f'])} · H1-Trend {mk(q['t'])} · "
-                     f"in H1-Zone {mk(q['z'])} · Liquidity-Sweep {sw_txt} ({q['n']} von 4)")
-            notify(
-                f"{e['kind']}-{e['bt']}-entry",
-                f"🚀 {name}-Einstieg bestätigt (M1-CHoCH)\n"
-                f"Zone: {e['lo']:.2f} - {e['hi']:.2f}\n"
-                f"Einstieg ca.: {e['price']:.2f}\n"
-                f"Stop: {e['stop']:.2f} (Risiko {risk:.1f} Punkte)\n"
-                f"{tline}\n"
-                f"H1-Trend: {trend_name} ({tr})\n"
-                f"{qline}\n"
-                f"Erst im Demokonto testen, kein Finanzrat.",
-            )
-
-    brk, brk_stat = breakout_signals(closed["M15"], closed["H1"])
-    if now.weekday() < 5:
-        for b in brk:
-            if b["ct"] < cutoff.timestamp():
-                continue
-            is_long = b["kind"] == "long"
-            name = "Long" if is_long else "Short"
-            notify(
-                f"brk-{b['kind']}-{b['ct']}",
-                f"📈 {name}-Ausbruch (Test, M15, im H1-Trend)\n"
-                f"Einstieg ca.: {b['price']:.2f}\n"
-                f"Stop: {b['stop']:.2f} (Risiko {b['risk']:.1f} Punkte)\n"
-                f"Ziel 1:1: {b['target']:.2f}\n"
-                f"Test-Strategie, nur im Demokonto, kein Finanzrat.",
-            )
-
-    bhist = load_history("brk_history")
-    bknown = {x["id"] for x in bhist}
-    for b in brk:
-        bid = f"{b['kind']}-{b['ct']}"
-        if bid in bknown or b["ct"] < (now - timedelta(hours=BRK_BACKFILL_H)).timestamp():
-            continue
-        bhist.append({
-            "id": bid, "kind": b["kind"], "t": b["ct"] - 60,
-            "price": b["price"], "stop": b["stop"], "target": b["target"],
-            "res": "offen", "rt": None,
-        })
-    bhist = [x for x in bhist if x["t"] >= (now - timedelta(days=HISTORY_DAYS)).timestamp()]
-    for x in bhist:
-        if x["res"] == "offen":
-            res, rt = evaluate_entry(x, m1, m5)
-            x["res"] = res
-            x["rt"] = rt
-            if res == "offen" and x["t"] < (now - timedelta(hours=23)).timestamp():
-                x["res"] = "unklar"
-    bhist.sort(key=lambda x: x["t"], reverse=True)
-
-    h1e = find_h1_entries(m5, closed["H1"], h1_blocks)
-    hh = {x["id"]: x for x in load_history("h1_history")}
-    for e in h1e:
-        if e["id"] not in hh:
-            hh[e["id"]] = {
-                "id": e["id"], "kind": e["kind"], "t": e["ct"] - 60, "price": e["price"],
-                "stop": e["stop"], "target": e["t1"], "target2": e["t2"],
-                "lo": e["lo"], "hi": e["hi"], "res": "offen", "res2": "offen", "rt": None,
-                "q": quality({"kind": e["kind"], "lo": e["lo"], "hi": e["hi"], "fvg": False}, trend, [], m5, levels),
-            }
-            if now.weekday() < 5 and e["ct"] >= cutoff.timestamp():
-                is_long = e["kind"] == "long"
-                notify(
-                    f"h1z-{e['id']}",
-                    f"🕐 {'Long' if is_long else 'Short'}-Einstieg an H1-Zone (Test, M5-Bestätigung)\n"
-                    f"H1-Zone: {e['lo']:.2f} - {e['hi']:.2f}\n"
-                    f"Einstieg ca.: {e['price']:.2f}\n"
-                    f"Stop: {e['stop']:.2f} (Risiko {e['risk']:.1f} Punkte)\n"
-                    f"Ziel 1:1: {e['t1']:.2f} · Ziel 1:2: {e['t2']:.2f}\n"
-                    f"H1-Trend: {trend} ({'passt' if e['kind'] == trend else 'GEGEN den Trend'})\n"
-                    f"Test-Strategie, nur im Demokonto, kein Finanzrat.",
-                )
-    keep_h = (now - timedelta(days=HISTORY_DAYS)).timestamp()
-    for x in hh.values():
-        if x["res"] == "offen":
-            res, rt = evaluate_entry(x, m1, m5)
-            x["res"], x["rt"] = res, rt
-        if x["res2"] == "offen":
-            y = dict(x)
-            y["target"] = x["target2"]
-            res2, _ = evaluate_entry(y, m1, m5)
-            x["res2"] = res2
-        for key in ("res", "res2"):
-            if x[key] == "offen" and x["t"] < (now - timedelta(hours=23)).timestamp():
-                x[key] = "unklar"
-    hlist = sorted([x for x in hh.values() if x["t"] >= keep_h], key=lambda x: x["t"], reverse=True)
-
-    rhist = {x["id"]: x for x in load_history("rt_history")}
-    for b in brk:
-        if b["ct"] < (now - timedelta(hours=BRK_BACKFILL_H)).timestamp():
-            continue
-        rid = f"{b['kind']}-{b['ct']}"
-        old_r = rhist.get(rid)
-        if old_r and old_r.get("final"):
-            continue
-        ev = eval_retest(b, m5)
-        is_long = b["kind"] == "long"
-        name = "Long" if is_long else "Short"
-        if now.weekday() < 5 and b["ct"] >= cutoff.timestamp():
-            notify(
-                f"rt-{rid}",
-                f"📈 {name}-Ausbruch + Retest (Test, M15)\n"
-                f"Limit-Order bei: {b['level']:.2f} (durchbrochenes Niveau)\n"
-                f"Stop: {ev['stop']:.2f} (Risiko {b['atr']:.1f} Punkte)\n"
-                f"Ziel 1:2: {ev['target']:.2f}\n"
-                f"Gilt ca. 3 Std. und verfällt, wenn der Kurs vorher klar durchfällt.\n"
-                f"Test-Strategie, nur im Demokonto, kein Finanzrat.",
-            )
-        if ev["st"] == "ausgelöst" and now.weekday() < 5 and ev["ft"] >= cutoff.timestamp():
-            notify(f"rt-{rid}-fill",
-                   f"✅ {name}-Limit ausgelöst bei {b['level']:.2f} (Ausbruch + Retest, Test)")
-        final = ev["st"] == "verfallen" or ev.get("res") in ("Ziel", "Stop")
-        rhist[rid] = {
-            "id": rid, "kind": b["kind"], "t": b["ct"], "price": b["level"],
-            "stop": ev["stop"], "target": ev["target"], "st": ev["st"],
-            "res": ev.get("res"), "final": final,
-        }
-    keep_r = (now - timedelta(days=HISTORY_DAYS)).timestamp()
-    rlist = sorted([x for x in rhist.values() if x["t"] >= keep_r], key=lambda x: x["t"], reverse=True)
-
-    history = load_history()
-    known = {x["id"] for x in history}
-    first_run = len(history) == 0
-    for e in ents5:
-        eid = f"{e['kind']}-{e['bt']}"
-        if eid in known:
-            continue
-        risk = abs(e["price"] - e["stop"])
-        if risk <= 0:
-            continue
-        if e["kind"] == "long":
-            target = e["price"] + risk
-        else:
-            target = e["price"] - risk
-        history.append({
-            "id": eid,
-            "kind": e["kind"],
-            "t": e["t"],
-            "price": e["price"],
-            "stop": e["stop"],
-            "target": round(target, 2),
-            "lo": e["lo"],
-            "hi": e["hi"],
-            "fit": None if first_run else (trend == "neutral" or e["kind"] == trend),
-            "q": None if first_run else e["q"],
-            "res": "offen",
-            "rt": None,
-        })
-    keep_t = (now - timedelta(days=HISTORY_DAYS)).timestamp()
-    history = [x for x in history if x["t"] >= keep_t]
-    seen_h, dedup = set(), []
-    for x in sorted(history, key=lambda x: x["t"]):
-        k = (x["kind"], x["t"], round(x["price"], 2))
-        if k in seen_h:
-            continue
-        seen_h.add(k)
-        dedup.append(x)
-    history = dedup
-    for x in history:
-        if x["res"] == "offen":
-            res, rt = evaluate_entry(x, m1, m5)
-            x["res"] = res
-            x["rt"] = rt
-            if res == "offen" and x["t"] < (now - timedelta(hours=23)).timestamp():
-                x["res"] = "unklar"
-    history.sort(key=lambda x: x["t"], reverse=True)
-
-    out = {
-        "updated": now.isoformat(),
-        "trend": trend,
-        "levels": levels,
-        "key": key,
-        "history": history,
-        "brk_history": bhist,
-        "rt_history": rlist,
-        "h1_history": hlist,
-        "brk_stat": brk_stat,
-        "frames": {},
-        "entries": [],
-    }
-    for name, df_full in full.items():
-        blocks = blocks5 if name == "M5" else find_blocks(closed[name])
-        shown = df_full.iloc[-SHOW:]
-        first_t = int(shown.iloc[0].time.timestamp())
-        if name == "M5":
-            limit = max(first_t, int((now - timedelta(hours=APP_ENTRY_HOURS)).timestamp()))
-            out["entries"] = [
-                {k: v for k, v in e.items() if k not in ("bt", "k", "i")}
-                for e in ents5 if e["t"] >= limit
-            ]
-        visible = [b for b in blocks if b["t"] >= first_t]
-        merged = merge(visible, GAP[name])
-        clean = [
-            {
-                "kind": b["kind"],
-                "lo": round(b["lo"], 2),
-                "hi": round(b["hi"], 2),
-                "t": b["t"],
-                "status": b["status"],
-                "n": b["n"],
-                "with": trend == "neutral" or b["kind"] == trend,
-            }
-            for b in merged
-        ]
-        candles = [
-            {
-                "t": int(r.time.timestamp()),
-                "o": round(float(r.open), 2),
-                "h": round(float(r.high), 2),
-                "l": round(float(r.low), 2),
-                "c": round(float(r.close), 2),
-            }
-            for r in shown.itertuples()
-        ]
-        out["frames"][name] = {"candles": candles, "blocks": clean}
-
+    out = []
+    for key, name, cands, dec, step in MARKETS:
+        try:
+            m = process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step,
+                               old.get(key, {}).get("epic"))
+            print(name, m["epic"], "ok, Trend", m["trend"])
+            out.append(m)
+        except Exception as e:
+            print(name, "Fehler:", e)
+            if key in old:
+                o = old[key]
+                o["stale"] = True
+                out.append(o)
     os.makedirs("docs", exist_ok=True)
     with open("docs/data.json", "w") as f:
-        json.dump(out, f)
+        json.dump({"updated": now.isoformat(), "markets": out}, f)
     save_state(state)
 
 
