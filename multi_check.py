@@ -574,6 +574,24 @@ def day_levels(h1):
     return [{"n": "PDH", "p": float(pd_.high.max())}, {"n": "PDL", "p": float(pd_.low.min())}]
 
 
+def save_overview(ov, now):
+    """Schreibt den H1-Trend aller Maerkte fuer die App (docs/trends.json)."""
+    path = "docs/trends.json"
+    old = {}
+    try:
+        with open(path) as f:
+            for x in json.load(f).get("markets", []):
+                old[x["name"]] = x
+    except Exception:
+        pass
+    old.update(ov)
+    order = [n for n, _ in MARKETS]
+    rows = [old[n] for n in order if n in old]
+    os.makedirs("docs", exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({"updated": now.isoformat(), "markets": rows}, f)
+
+
 def main():
     global STATE_FILE, EPIC
     STATE_FILE = STATE
@@ -583,6 +601,7 @@ def main():
     if now.weekday() >= 5:
         return
     h = login()
+    ov = {}
     for name, cands in MARKETS:
         try:
             ep = pick_epic(h, cands)
@@ -595,6 +614,7 @@ def main():
                 continue
             trend = get_trend(h1)
             levels = day_levels(h1)
+            ov[name] = {"name": name, "trend": trend, "price": round(float(h1.close.iloc[-1]), 5)}
             h1_blocks = find_blocks(h1)
             for tf, res, mins in TFS:
                 df = h1 if tf == "H1" else get_candles(h, res).iloc[:-1].reset_index(drop=True)
@@ -626,6 +646,7 @@ def main():
         except Exception as e:
             print(name, "Fehler:", e)
     save_state(state)
+    save_overview(ov, now)
 
 
 if __name__ == "__main__":
