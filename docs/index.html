@@ -14,6 +14,10 @@ h2{font-size:15px;margin:14px 0 0}
 #key{font-size:13px;margin-top:6px}
 #key .r{color:#f87171}
 #key .s{color:#4ade80}
+#ov{margin-top:8px;font-size:13px}
+#ov .o{display:flex;justify-content:space-between;padding:6px 10px;margin-top:4px;border-radius:8px;background:#141a26;border-left:4px solid #6b7280}
+#ov .o.long{border-color:#22c55e}#ov .o.short{border-color:#ef4444}
+#ov .o b.long{color:#4ade80}#ov .o b.short{color:#f87171}
 #in{font-size:13px;margin-top:6px;color:#facc15}
 .tabs{display:flex;gap:8px;padding:0 14px 8px}
 .tabs button{flex:1;padding:10px;border-radius:10px;border:1px solid #2a3142;background:#141a26;color:#e6e9ef;font-size:15px}
@@ -42,6 +46,7 @@ label{display:block;padding:4px 14px;font-size:14px;color:#8b93a5}
 <div id="trend"></div>
 <div id="key"></div>
 <div id="in"></div>
+<div id="ov"></div>
 </header>
 <div class="tabs" id="tabs">
 <button data-f="M5" class="on">M5</button>
@@ -89,9 +94,24 @@ async function load(){
       "Stand: "+new Date(DATA.updated).toLocaleString("de-DE");
     document.getElementById("trend").textContent="H1-Trend: "+TR[DATA.trend||"neutral"];
     render();
+    loadOv();
   }catch(e){
     document.getElementById("upd").textContent="Daten konnten nicht geladen werden ("+e.message+")";
   }
+}
+
+async function loadOv(){
+  const el=document.getElementById("ov");
+  const rows=[];
+  if(DATA)rows.push({name:"Gold",trend:DATA.trend||"neutral"});
+  try{
+    const r=await fetch("trends.json?"+Date.now());
+    const t=await r.json();
+    (t.markets||[]).forEach(m=>rows.push(m));
+  }catch(e){}
+  const L={long:"▲ Long",short:"▼ Short",neutral:"► Neutral"};
+  el.innerHTML='<div style="color:#8b93a5;margin-bottom:2px">H1-Trend aller Märkte</div>'+rows.map(m=>
+    '<div class="o '+(m.trend||"neutral")+'"><span>'+m.name+'</span><b class="'+(m.trend||"neutral")+'">'+(L[m.trend]||L.neutral)+'</b></div>').join("");
 }
 
 function fblocks(f){
