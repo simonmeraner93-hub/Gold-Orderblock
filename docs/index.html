@@ -151,9 +151,6 @@ function zone(b,cs,cw,W,padR,y,cl,name,m){
   const a=(b.status==="angetestet"?0.15:0.30)*f;
   const lab=(name?name+" ":"")+"OB"+(b.fvg==="offen"?" (FVG ?)":"");
   box(b.t,b.lo,b.hi,cs,cw,W,padR,y,cl,col,a,0.9*f,!!name,lab);
-  if(b.f_t&&b.f_lo!==undefined){
-    box(b.f_t,b.f_lo,b.f_hi,cs,cw,W,padR,y,cl,"168,85,247",0.28*f,0.95*f,false,(name?name+" ":"")+"FVG");
-  }
 }
 
 function visibleBlocks(m,f,t0){
@@ -193,14 +190,12 @@ function draw(){
 
   if(document.getElementById("hz").checked&&frame==="M5"){
     visibleBlocks(m,"H1",t0).forEach(b=>{
-      if(b.hi<lo&&(b.f_hi===undefined||b.f_hi<lo))return;
-      if(b.lo>hi&&(b.f_lo===undefined||b.f_lo>hi))return;
+      if(b.hi<lo||b.lo>hi)return;
       zone(b,cs,cw,W,padR,y,cl,"H1",m);
     });
   }
   visibleBlocks(m,frame,t0).forEach(b=>{
-    if(b.hi<lo&&(b.f_hi===undefined||b.f_hi<lo))return;
-    if(b.lo>hi&&(b.f_lo===undefined||b.f_lo>hi))return;
+    if(b.hi<lo||b.lo>hi)return;
     zone(b,cs,cw,W,padR,y,cl,null,m);
   });
 
@@ -251,7 +246,7 @@ function list(){
   document.getElementById("list").innerHTML=bl.map(b=>
     '<div class="z '+b.kind+(b.with?'':' ag')+'"><div><b>'+(b.kind==="long"?"Long":"Short")+
     '</b> '+fx(b.lo,m)+' - '+fx(b.hi,m)+
-    '<small>'+new Date(b.t*1000).toLocaleString("de-DE")+' · FVG '+(b.fvg==='ja'?'✓':'?')+(b.f_lo!==undefined?' ('+fx(b.f_lo,m)+' - '+fx(b.f_hi,m)+')':'')+' · '+(b.with?'im Trend':'gegen Trend')+'</small></div>'+
+    '<small>'+new Date(b.t*1000).toLocaleString("de-DE")+' · FVG '+(b.fvg==='ja'?'✓':'?')+' · '+(b.with?'im Trend':'gegen Trend')+'</small></div>'+
     '<div class="st">'+ST[b.status]+'</div></div>'
   ).join("")||"<p>Keine Zonen</p>";
 }
