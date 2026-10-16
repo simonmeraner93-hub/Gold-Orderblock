@@ -194,10 +194,23 @@ def find_blocks(df):
                 fvg = bool(df.iloc[i + 1].low > df.iloc[i - 1].high)
             else:
                 fvg = bool(df.iloc[i + 1].high < df.iloc[i - 1].low)
+        fl = fh = ft = None
+        filled = False
+        if known and fvg:
+            if kind == "long":
+                fl, fh = float(df.iloc[i - 1].high), float(df.iloc[i + 1].low)
+            else:
+                fl, fh = float(df.iloc[i + 1].high), float(df.iloc[i - 1].low)
+            ft = int(df.iloc[i - 1].time.timestamp())
+            for j in range(i + 2, len(df)):
+                if (kind == "long" and df.iloc[j].low <= fl) or (kind == "short" and df.iloc[j].high >= fh):
+                    filled = True
+                    break
         result.append({
             "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
             "t": int(df.iloc[k].time.timestamp()), "status": status,
             "fvg": fvg, "fvg_known": known,
+            "fvg_lo": fl, "fvg_hi": fh, "fvg_t": ft, "fvg_filled": filled,
         })
     return result
 
@@ -341,14 +354,22 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
     for tf, (df, full, mins) in dfs.items():
         shown = full.iloc[-SHOW:]
         first_t = int(shown.iloc[0].time.timestamp())
-        vis = [b for b in blocks[tf] if b["t"] >= first_t]
-        merged = merge(vis, GAP_BASE[tf] * scale)
-        zones = [{
-            "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
-            "t": b["t"], "status": b["status"], "n": b["n"],
-            "fvg": bool(b["fvg"]),
-            "with": trend == "neutral" or b["kind"] == trend,
-        } for b in merged]
+        vis = [b for b in blocks[tf]
+               if b["t"] >= first_t and b["status"] != "ungueltig"
+               and (b["fvg"] or not b["fvg_known"])]
+        zones = []
+        for b in vis:
+            z = {
+                "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
+                "t": b["t"], "status": b["status"],
+                "fvg": "ja" if b["fvg"] else "offen",
+                "with": trend == "neutral" or b["kind"] == trend,
+            }
+            if b["fvg"] and not b["fvg_filled"]:
+                z["f_lo"] = round(b["fvg_lo"], dec)
+                z["f_hi"] = round(b["fvg_hi"], dec)
+                z["f_t"] = b["fvg_t"]
+            zones.append(z)
         candles = [{
             "t": int(r.time.timestamp()),
             "o": round(float(r.open), dec), "h": round(float(r.high), dec),
