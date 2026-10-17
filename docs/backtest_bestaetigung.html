@@ -1,0 +1,31 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Backtest Bestätigung</title>
+<style>body{font:14px system-ui,sans-serif;margin:12px;background:#111;color:#ddd}h2{font-size:16px;margin:18px 0 6px}
+table{border-collapse:collapse;width:100%;margin-bottom:6px}td,th{padding:4px 6px;border-bottom:1px solid #333;text-align:right;font-size:12px}
+th:first-child,td:first-child{text-align:left}.g{color:#4c4}.r{color:#e55}.n{color:#999}select{font-size:14px;margin:4px 4px 4px 0}small{color:#999}</style></head><body>
+<h1 style="font-size:18px">Backtest: Bestätigungs-Einstieg</h1>
+<div id="info"><small>lädt…</small></div>
+<select id="m"></select><select id="tf"><option>M5</option><option>H1</option></select><select id="e"><option value="bestaetigung">Bestätigung</option></select>
+<div id="out"></div>
+<small>Ø R = durchschnittlicher Gewinn pro Trade in Vielfachen des Risikos, nach Spread. t-Wert über 2 = statistisch belastbar. 1. Hälfte / 2. Hälfte: sollte beides positiv sein.</small>
+<script>
+let D=null;
+const V=[["trend","Trend (ohne FVG)"],["strategie","Trend + FVG"],["stark","Trend + FVG + starker Ausbruch"]];
+function cell(s){if(!s||!s.n)return'<td class="n" colspan="6">keine Trades</td>';
+const c=s.t>=2?'g':(s.avg<0?'r':'');
+return`<td>${s.n}</td><td>${s.win}%</td><td class="${s.avg>0?'g':'r'}">${s.avg}</td><td class="${c}">${s.t}</td><td class="${s.h1>0?'g':'r'}">${s.h1}</td><td class="${s.h2>0?'g':'r'}">${s.h2}</td>`}
+function show(){
+const m=document.getElementById('m').value,tf=document.getElementById('tf').value,e=document.getElementById('e').value;
+const st=m==='pool'?D.pooled:(D.markets.find(x=>x.name===m)||{}).stats;
+let h='';
+if(!st||!st[tf]){document.getElementById('out').innerHTML='<p>keine Daten</p>';return}
+for(const rr of['1.0','1.5','2.0']){
+h+=`<h2>Ziel ${rr[0]}R</h2><table><tr><th></th><th>Trades</th><th>Gewinn</th><th>Ø R</th><th>t</th><th>1. Hä.</th><th>2. Hä.</th></tr>`;
+for(const[v,n]of V){const s=(((st[tf]||{})[v]||{})[e]||{})[rr];h+=`<tr><td>${n}</td>${cell(s)}</tr>`}
+h+='</table>'}
+document.getElementById('out').innerHTML=h}
+fetch('backtest_bestaetigung.json?'+Date.now()).then(r=>r.json()).then(d=>{D=d;
+document.getElementById('info').innerHTML='<small>Stand '+d.updated+'</small><br>'+d.markets.map(x=>x.name+': '+(x.error?x.error:(x.m5_candles+' M5 ('+x.m5_days+' Tage), '+x.h1_candles+' H1'))).join('<br>').replace(/^/,'<small>')+'</small>';
+const s=document.getElementById('m');s.innerHTML='<option value="pool">Alle Märkte zusammen</option>'+d.markets.map(x=>`<option>${x.name}</option>`).join('');
+['m','tf','e'].forEach(i=>document.getElementById(i).onchange=show);show()}).catch(e=>{document.getElementById('info').textContent='Noch keine Ergebnisse: '+e});
+</script></body></html>
