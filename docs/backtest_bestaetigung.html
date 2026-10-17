@@ -10,7 +10,7 @@ th:first-child,td:first-child{text-align:left}.g{color:#4c4}.r{color:#e55}.n{col
 <small>Ø R = durchschnittlicher Gewinn pro Trade in Vielfachen des Risikos, nach Spread. t-Wert über 2 = statistisch belastbar. 1. Hälfte / 2. Hälfte: sollte beides positiv sein.</small>
 <script>
 let D=null;
-const V=[["trend","Trend (ohne FVG)"],["strategie","Trend + FVG"],["stark","Trend + FVG + starker Ausbruch"]];
+const V=[["trend","Trend, Rücklauf in Block (ohne FVG)"],["ob","Trend + FVG, Rücklauf in Block"],["strategie","Trend + FVG, Rücklauf ins FVG (dein Einstieg)"],["stark","dein Einstieg + starker Ausbruch"]];
 function cell(s){if(!s||!s.n)return'<td class="n" colspan="6">keine Trades</td>';
 const c=s.t>=2?'g':(s.avg<0?'r':'');
 return`<td>${s.n}</td><td>${s.win}%</td><td class="${s.avg>0?'g':'r'}">${s.avg}</td><td class="${c}">${s.t}</td><td class="${s.h1>0?'g':'r'}">${s.h1}</td><td class="${s.h2>0?'g':'r'}">${s.h2}</td>`}
@@ -20,7 +20,7 @@ const st=m==='pool'?D.pooled:(D.markets.find(x=>x.name===m)||{}).stats;
 let h='';
 if(!st||!st[tf]){document.getElementById('out').innerHTML='<p>keine Daten</p>';return}
 for(const rr of['1.0','1.5','2.0']){
-h+=`<h2>Ziel ${rr[0]}R</h2><table><tr><th></th><th>Trades</th><th>Gewinn</th><th>Ø R</th><th>t</th><th>1. Hä.</th><th>2. Hä.</th></tr>`;
+h+=`<h2>Ziel ${rr}R</h2><table><tr><th></th><th>Trades</th><th>Gewinn</th><th>Ø R</th><th>t</th><th>1. Hä.</th><th>2. Hä.</th></tr>`;
 for(const[v,n]of V){const s=(((st[tf]||{})[v]||{})[e]||{})[rr];h+=`<tr><td>${n}</td>${cell(s)}</tr>`}
 h+='</table>'}
 document.getElementById('out').innerHTML=h}
