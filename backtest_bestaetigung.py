@@ -22,15 +22,16 @@ import backtest_strategie as bs
 
 RRS = [1.0, 1.5, 2.0]
 CONF_WAIT = {"M5": 12, "H1": 6}      # Kerzen nach der Beruehrung fuer die Bestaetigung
-VARIANTS = ["trend", "strategie", "stark"]
+VARIANTS = ["trend", "ob", "strategie", "stark"]
 NAMES = {
-    "trend": "Trend (ohne FVG)",
-    "strategie": "Trend + FVG",
-    "stark": "Trend + FVG + starker Ausbruch (2x)",
+    "trend": "Trend (ohne FVG), Rücklauf in den Block",
+    "ob": "Trend + FVG, Rücklauf in den Block",
+    "strategie": "Trend + FVG, Rücklauf ins FVG (dein Einstieg)",
+    "stark": "wie dein Einstieg + starker Ausbruch (2x)",
 }
 
 
-def simulate_conf(d, b, tf, spread):
+def simulate_conf(d, b, tf, spread, mode="block"):
     o, hi, lo, c = d["o"], d["h"], d["l"], d["c"]
     n = len(c)
     k, i, kind = b["k"], b["i"], b["kind"]
@@ -41,7 +42,11 @@ def simulate_conf(d, b, tf, spread):
     for j in range(i + 2, min(i + 2 + bs.WAIT[tf], n)):
         if (kind == 1 and c[j] < zlo) or (kind == -1 and c[j] > zhi):
             return None                       # Block durchbrochen
-        if (kind == 1 and lo[j] <= zhi) or (kind == -1 and hi[j] >= zlo):
+        if mode == "fvg":
+            hit = (lo[j] <= lo[i + 1]) if kind == 1 else (hi[j] >= hi[i + 1])
+        else:
+            hit = (lo[j] <= zhi) if kind == 1 else (hi[j] >= zlo)
+        if hit:
             touch = j
             break
     if touch is None:
@@ -106,24 +111,23 @@ def run_market(m5, h1, spread):
                 fit = (trend == 0) or (trend == b["kind"])
                 if not fit:
                     continue
-                variants = []
+                plan = []          # (Variante, Modus)
+                ok_fvg = b["adj"] and b["fvg"]
                 if tag == "n":
-                    variants.append("trend")
-                    if b["adj"] and b["fvg"]:
-                        variants.append("strategie")
-                elif b["adj"] and b["fvg"]:
-                    variants.append("stark")
-                if not variants:
-                    continue
-                sim = simulate_conf(d, b, tf, spread)
-                if sim is None:
-                    continue
-                cost = spread / sim["risk"]
-                for rr in RRS:
-                    rn = sim["r"][rr] - cost
-                    for v in variants:
+                    plan.append(("trend", "block"))
+                    if ok_fvg:
+                        plan.append(("ob", "block"))
+                        plan.append(("strategie", "fvg"))
+                elif ok_fvg:
+                    plan.append(("stark", "fvg"))
+                for v, mode in plan:
+                    sim = simulate_conf(d, b, tf, spread, mode)
+                    if sim is None:
+                        continue
+                    cost = spread / sim["risk"]
+                    for rr in RRS:
                         trades.append({"tf": tf, "variant": v, "entry": "bestaetigung",
-                                       "rr": rr, "r": float(rn), "t": sim["t"]})
+                                       "rr": rr, "r": float(sim["r"][rr] - cost), "t": sim["t"]})
     return trades
 
 
