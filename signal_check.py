@@ -27,7 +27,6 @@ SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
 # key, Name, moegliche Epics, Nachkommastellen, Abstand der runden Marken
 MARKETS = [
     ("gold", "Gold", ["GOLD"], 2, 50),
-    ("us500", "S&P 500", ["US500"], 2, 100),
     ("us100", "Nasdaq 100", ["US100"], 2, 500),
     ("eurusd", "EUR/USD", ["EURUSD"], 5, 0.01),
     ("gbpusd", "GBP/USD", ["GBPUSD"], 5, 0.01),
