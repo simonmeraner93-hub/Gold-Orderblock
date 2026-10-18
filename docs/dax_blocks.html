@@ -1,0 +1,34 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DAX Orderblöcke</title>
+<style>body{font:14px system-ui,sans-serif;margin:12px;background:#111;color:#ddd}
+.b{border:1px solid #333;border-radius:8px;padding:8px 10px;margin:8px 0}.l{color:#4c4}.s{color:#e55}
+.h{display:flex;justify-content:space-between;font-weight:600}small,.m{color:#999}.g{color:#4c4}.r{color:#e55}label{display:block;margin:8px 0}</style></head><body>
+<h1 style="font-size:18px">DAX: letzte 50 Orderblöcke (M5)</h1>
+<div id="info" class="m">lädt…</div>
+<label><input type="checkbox" id="res"> Testergebnis zeigen (erst selbst einzeichnen!)</label>
+<div id="out"></div>
+<script>
+const f=(x)=>x.toFixed(1);
+const tm=(s)=>new Date(s*1000).toLocaleString('de-DE',{timeZone:'Europe/Rome',weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+let D=null;
+function show(){
+const on=document.getElementById('res').checked;let w=0,l=0,o=0,n=0;
+let h=D.blocks.slice().reverse().map((b,idx)=>{
+const long=b.kind==1;const tr=b.trade;
+let res='';
+if(on){
+ if(!tr)res='<div class="m">Test: kein Einstieg (kein Rücklauf ins FVG oder keine Bestätigung)</div>';
+ else{n++;const a=tr.r1,c=tr.r2;
+  res=`<div>Einstieg ${tm(tr.t)} bei ${f(tr.price)}, Stop ${f(tr.stop)}<br>
+  1:1 → ${f(tr.z1)}: <b class="${a=='Ziel'?'g':a=='Stop'?'r':''}">${a}</b> &nbsp; 1:2 → ${f(tr.z2)}: <b class="${c=='Ziel'?'g':c=='Stop'?'r':''}">${c}</b></div>`;
+  if(a=='Ziel')w++;else if(a=='Stop')l++;else o++}}
+return `<div class="b"><div class="h"><span class="${long?'l':'s'}">${long?'Long':'Short'}-Orderblock</span><span>${tm(b.t)}</span></div>
+Block: ${f(b.lo)} – ${f(b.hi)}<br>FVG: ${f(b.fvg_lo)} – ${f(b.fvg_hi)}<br>
+<small>H1-Trend: ${b.trend==1?'long':b.trend==-1?'short':'neutral'}</small>${res}</div>`}).join('');
+let sum='';
+if(on)sum=`<div class="b"><b>Zusammenfassung (Einstieg nach deiner Regel):</b><br>${n} Einstiege von ${D.blocks.length} Blöcken<br>Bei 1:1: ${w} Ziele, ${l} Stops, ${o} offen</div>`;
+document.getElementById('out').innerHTML=sum+h}
+fetch('dax_blocks.json?'+Date.now()).then(r=>r.json()).then(d=>{D=d;
+document.getElementById('info').textContent=d.epic+' · Spread '+d.spread+' · Stand '+d.updated+' · Zeiten: Rom/Wien';
+document.getElementById('res').onchange=show;show()}).catch(e=>{document.getElementById('info').textContent='Noch keine Daten: '+e});
+</script></body></html>
