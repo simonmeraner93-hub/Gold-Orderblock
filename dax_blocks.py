@@ -19,6 +19,43 @@ CANDS = ["DE40", "GER40", "DAX40"]
 COUNT = 50
 
 
+def fetch_safe(h, epic, res, days, chunk_days, per_call):
+    """Wie bs.fetch, aber leere Zeitraeume (Wochenende, 404) werden uebersprungen."""
+    import time
+    import pandas as pd
+    from datetime import timedelta
+    end = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    cur = (end - timedelta(days=days)).replace(hour=0, minute=0)
+    rows = {}
+    while cur < end:
+        nxt = min(cur + timedelta(days=chunk_days), end)
+        params = {"resolution": res, "from": cur.strftime("%Y-%m-%dT%H:%M:%S"),
+                  "to": nxt.strftime("%Y-%m-%dT%H:%M:%S"), "max": per_call}
+        r = None
+        for attempt in range(4):
+            r = requests.get(f"{bs.BASE}/prices/{epic}", headers=h, params=params, timeout=30)
+            if r.status_code == 429:
+                time.sleep(3 * (attempt + 1))
+                continue
+            break
+        if r.status_code == 404:
+            cur = nxt
+            continue
+        r.raise_for_status()
+        for p in r.json().get("prices", []):
+            t = int(pd.Timestamp(p["snapshotTimeUTC"], tz="UTC").timestamp())
+            mid = lambda k: (p[k]["bid"] + p[k]["ask"]) / 2
+            rows[t] = (mid("openPrice"), mid("highPrice"), mid("lowPrice"), mid("closePrice"))
+        cur = nxt
+        time.sleep(0.4)
+    if len(rows) < 300:
+        raise RuntimeError(f"zu wenige Kerzen erhalten: {len(rows)}")
+    ts = sorted(rows)
+    arr = np.array([rows[t] for t in ts], dtype=float)
+    return {"t": np.array(ts[:-1], dtype=np.int64), "o": arr[:-1, 0], "h": arr[:-1, 1],
+            "l": arr[:-1, 2], "c": arr[:-1, 3]}
+
+
 def outcome(d, entry_j, kind, price, stop, rr):
     risk = abs(price - stop)
     target = price + rr * risk if kind == 1 else price - rr * risk
@@ -52,16 +89,18 @@ def main():
     m5 = h1 = None
     for days in (70, 40):
         try:
-            m5 = bs.fetch(h, epic, "MINUTE_5", days, 3, 1000)
+            m5 = fetch_safe(h, epic, "MINUTE_5", days, 3, 1000)
             break
         except Exception as e:
             print("M5", days, e)
     for days in (365, 180, 90):
         try:
-            h1 = bs.fetch(h, epic, "HOUR", days, 30, 1000)
+            h1 = fetch_safe(h, epic, "HOUR", days, 30, 1000)
             break
         except Exception as e:
             print("H1", days, e)
+    if m5 is None or h1 is None:
+        raise SystemExit("Kerzen konnten nicht geladen werden")
     spread = bs.measure_spread(h, epic) or 0.0
     tr = bs.h1_trend(h1)
     avail = h1["t"] + 3600
