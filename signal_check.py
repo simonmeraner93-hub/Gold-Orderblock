@@ -17,6 +17,7 @@ REF_PRICE = 4160.0
 GAP_BASE = {"M5": 1.0, "H1": 4.0}
 STRONG = 1.5
 FVG_MIN = 0.25    # Fair Value Gap muss mindestens so gross sein wie dieser Anteil der durchschnittlichen Kerzenkoerper
+GROUP_MAX = 2     # so viele kleine Fortsetzungskerzen duerfen zwischen Block und Impuls liegen
 ADJACENT = True   # Orderblock muss die Kerze direkt vor dem Impuls sein (dann hängt das FVG am Block)
 SWING = 10
 SHOW = 150
@@ -173,6 +174,21 @@ def find_blocks(df):
     for k, (kind, i) in found.items():
         lo = float(df.iloc[k].low)
         hi = float(df.iloc[k].high)
+        adj = k == i - 1
+        # kleine Fortsetzungskerzen zwischen Block und Impuls (max. 2) gehoeren zur Zone
+        if not adj and i - k - 1 <= GROUP_MAX:
+            avg_g = float(body.iloc[max(0, i - 20):i].mean())
+            same = True
+            for j in range(k + 1, i):
+                cj = df.iloc[j]
+                dir_ok = (cj.close > cj.open) if kind == "long" else (cj.close < cj.open)
+                if not dir_ok or abs(cj.close - cj.open) >= STRONG * avg_g:
+                    same = False
+                    break
+            if same:
+                adj = True
+                lo = float(df.iloc[k:i].low.min())
+                hi = float(df.iloc[k:i].high.max())
         status = "frisch"
         for j in range(i + 1, len(df)):
             c = df.iloc[j]
@@ -216,7 +232,7 @@ def find_blocks(df):
         result.append({
             "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
             "t": int(df.iloc[k].time.timestamp()), "status": status,
-            "fvg": fvg, "fvg_known": known, "adj": k == i - 1,
+            "fvg": fvg, "fvg_known": known, "adj": adj,
             "fvg_lo": fl, "fvg_hi": fh, "fvg_t": ft, "fvg_filled": filled,
         })
     return result
