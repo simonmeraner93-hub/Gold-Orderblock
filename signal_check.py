@@ -1,9 +1,10 @@
 """Orderblock-Radar fuer mehrere Maerkte.
 
-Telegram nur bei neuen Orderblöcken (M5 und H1), die
- - in Richtung des H1-Trends liegen (bei neutralem Trend beide Richtungen) und
- - ein Fair Value Gap haben (ist es noch nicht bekannt: Meldung mit Fragezeichen,
-   ist es bekannt und nicht vorhanden: keine Meldung).
+Telegram bei Orderblöcken (M5 und H1), die ein Fair Value Gap haben (ist es noch nicht
+bekannt: Meldung mit Fragezeichen, ist es bekannt und nicht vorhanden: keine Meldung),
+mit UND gegen den H1-Trend (die Meldung sagt, ob mit oder gegen den Trend):
+ 1. beim neuen Orderblock
+ 2. wenn der Kurs den Orderblock zum ersten Mal antestet
 Schreibt ausserdem docs/data.json fuer die App.
 """
 import os
@@ -190,6 +191,7 @@ def find_blocks(df):
                 lo = float(df.iloc[k:i].low.min())
                 hi = float(df.iloc[k:i].high.max())
         status = "frisch"
+        touch_j = None
         for j in range(i + 1, len(df)):
             c = df.iloc[j]
             if kind == "long":
@@ -198,12 +200,16 @@ def find_blocks(df):
                     break
                 if c.low <= hi:
                     status = "angetestet"
+                    if touch_j is None:
+                        touch_j = j
             else:
                 if c.close > hi:
                     status = "ungueltig"
                     break
                 if c.high >= lo:
                     status = "angetestet"
+                    if touch_j is None:
+                        touch_j = j
         known = i + 1 < len(df)          # Folgekerze schon geschlossen?
         fvg = False
         if known:
@@ -232,6 +238,7 @@ def find_blocks(df):
         result.append({
             "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
             "t": int(df.iloc[k].time.timestamp()), "status": status,
+            "touch_t": int(df.iloc[touch_j].time.timestamp()) if touch_j is not None else None,
             "fvg": fvg, "fvg_known": known, "adj": adj,
             "fvg_lo": fl, "fvg_hi": fh, "fvg_t": ft, "fvg_filled": filled,
         })
@@ -300,6 +307,12 @@ def sweep_info(df, b, levels, unit2):
 TRTXT = {"long": "Long (aufwärts)", "short": "Short (abwärts)", "neutral": "Neutral"}
 
 
+def rel_txt(trend, kind):
+    if trend == "neutral":
+        return "kein klarer Trend"
+    return "mit dem Trend ✓" if kind == trend else "GEGEN den Trend ⚠"
+
+
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
     order = ([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
@@ -327,6 +340,18 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
     blocks = {tf: find_blocks(dfs[tf][0]) for tf in dfs}
     valid_h1 = [b for b in blocks["H1"] if b["status"] != "ungueltig"]
 
+    # Antest durch die noch laufende Kerze sofort erkennen (nicht erst nach Kerzenschluss)
+    for tf, (df, full, mins) in dfs.items():
+        run = full.iloc[-1]
+        run_t = int(run.time.timestamp())
+        for b in blocks[tf]:
+            if b["status"] != "frisch":
+                continue
+            hit = (float(run.low) <= b["hi"]) if b["kind"] == "long" else (float(run.high) >= b["lo"])
+            if hit and run_t > b["t"]:
+                b["status"] = "angetestet"
+                b["touch_t"] = run_t
+
     # ---- Telegram ----
     if notify_ok:
         for tf, (df, _, mins) in dfs.items():
@@ -334,8 +359,6 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 if b["status"] == "ungueltig":
                     continue
                 if ADJACENT and not b["adj"]:
-                    continue
-                if trend != "neutral" and b["kind"] != trend:
                     continue
                 if b["fvg_known"] and not b["fvg"]:
                     continue
@@ -355,7 +378,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 lines = [
                     f"{icon} {name.upper() if key == 'gold' else name}: Neuer {'Long' if long_ else 'Short'}-Orderblock ({tf})",
                     f"Zone: {b['lo']:.{dec}f} - {b['hi']:.{dec}f}",
-                    f"H1-Trend: {TRTXT[trend]} · Fair Value Gap: {fv}",
+                    f"H1-Trend: {TRTXT[trend]} · {rel_txt(trend, b['kind'])} · Fair Value Gap: {fv}",
                 ]
                 if tf == "M5":
                     h1z = any(
@@ -366,6 +389,31 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 else:
                     lines.append(f"Liquidity-Sweep: {swt}")
                 tg("\n".join(lines))
+                state[skey] = now.timestamp()
+
+        # ---- Antest-Meldungen ----
+        for tf, (df, full_tf, mins) in dfs.items():
+            now_price = float(full_tf.iloc[-1].close)
+            for b in blocks[tf]:
+                if b["status"] != "angetestet" or b["touch_t"] is None:
+                    continue
+                if ADJACENT and not b["adj"]:
+                    continue
+                if b["fvg_known"] and not b["fvg"]:
+                    continue
+                if b["touch_t"] + mins * 60 < cutoff.timestamp():
+                    continue
+                skey = f"{epic}-{tf}-{b['kind']}-{b['t']}-test"
+                if skey in state:
+                    continue
+                long_ = b["kind"] == "long"
+                icon = "🟢" if long_ else "🔴"
+                fv = "✓" if b["fvg"] else "?"
+                tg("\n".join([
+                    f"🎯 {name.upper() if key == 'gold' else name}: {'Long' if long_ else 'Short'}-Orderblock ANGETESTET ({tf}) {icon}",
+                    f"Zone: {b['lo']:.{dec}f} - {b['hi']:.{dec}f} · Kurs jetzt: {now_price:.{dec}f}",
+                    f"H1-Trend: {TRTXT[trend]} · {rel_txt(trend, b['kind'])} · Fair Value Gap: {fv}",
+                ]))
                 state[skey] = now.timestamp()
 
     # ---- App-Daten ----
