@@ -86,7 +86,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <div class="info" id="in"></div>
     <div class="keys" id="key"></div>
     <div class="note">Testtrade 1:1 ohne Spread, Stop an der Zonenkante. Der Einstieg erscheint erst nach der Bestätigungskerze.</div>
-    <label class="tog"><input type="checkbox" id="lv" checked> Tageshoch und Tagestief</label>
+    <label class="tog"><input type="checkbox" id="lv"> Tageshoch und Tagestief</label>
     <label class="tog"><input type="checkbox" id="hz"> H1-Zonen im M5-Chart</label>
   </div>
 
@@ -99,6 +99,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 
 <script>
 let DATA=null,frame="M5",cur="gold",NC={M5:60,H1:60};
+let labelsDrawn=[];
 const STEPS=[30,45,60,90,150];
 const CONF={M5:12,H1:6};
 try{const s=localStorage.getItem("mk");if(s)cur=s;}catch(e){}
@@ -126,13 +127,21 @@ function paperTrade(b,cs,f){
   const broke=c=>L?c.c<b.lo:c.c>b.hi;
   const touched=c=>L?c.l<=b.hi:c.h>=b.lo;
   let tj=-1;
-  for(let j=idx+3;j<cs.length;j++){
-    if(broke(cs[j]))return {s:"ungueltig"};
-    if(touched(cs[j])){tj=j;break;}
+  if("touch_t" in b){
+    // Antest genau wie beim Alarm: erste Berührung NACH dem Impuls (die Impulskerze selbst zählt nicht)
+    if(b.touch_t==null)return {s:"frisch"};
+    tj=cs.findIndex(c=>c.t>=b.touch_t);
+  }else{
+    for(let j=idx+3;j<cs.length;j++){
+      if(broke(cs[j]))return {s:"ungueltig"};
+      if(touched(cs[j])){tj=j;break;}
+    }
   }
   if(tj<0)return {s:"frisch"};
+  if(broke(cs[tj]))return {s:"ungueltig"};
   let ej=-1;
-  for(let j=tj;j<Math.min(cs.length,tj+CONF[f]);j++){
+  // Bestätigung frühestens auf der Kerze NACH der Antest-Kerze
+  for(let j=tj+1;j<Math.min(cs.length,tj+1+CONF[f]);j++){
     if(broke(cs[j]))return {s:"ungueltig"};
     const c=cs[j],p=cs[j-1];
     if(L?(c.c>c.o&&c.c>p.h):(c.c<c.o&&c.c<p.l)){ej=j;break;}
@@ -223,7 +232,7 @@ function niceStep(range,n){
 }
 
 function pill(x,y,text,col,alpha){
-  ctx.font="600 11px system-ui,sans-serif";
+  ctx.font="600 10px system-ui,sans-serif";
   const w=ctx.measureText(text).width+12;
   ctx.fillStyle="rgba(9,12,19,.85)";
   ctx.fillRect(x,y,w,17);
@@ -239,15 +248,17 @@ function zoneBox(b,cs,cw,W,padR,y,cl,prefix,dash){
   const h=Math.max(2,y2-y1);
   const col=b.kind==="long"?"34,197,94":"244,63,94";
   const f2=b.with?1:0.45;
-  ctx.fillStyle="rgba("+col+","+((b.status==="angetestet"?0.13:0.22)*f2)+")";
+  ctx.fillStyle="rgba("+col+","+((b.status==="angetestet"?0.07:0.12)*f2)+")";
   ctx.fillRect(x0,y1,W-padR-x0,h);
-  ctx.strokeStyle="rgba("+col+","+(0.7*f2)+")";
+  ctx.strokeStyle="rgba("+col+","+(0.45*f2)+")";
   ctx.lineWidth=1;
   ctx.setLineDash(dash?[4,3]:[]);
   ctx.strokeRect(x0+.5,y1+.5,W-padR-x0-1,h-1);
   ctx.setLineDash([]);
-  const label=(prefix?prefix+" ":"")+(b.kind==="long"?"Long":"Short")+" OB"+(b.fvg==="offen"?" · FVG ?":"")+(b.status==="angetestet"?" · angetestet":"");
-  pill(x0+6,y1+4,label,col,f2);
+  const label=(prefix?prefix+" ":"")+(b.kind==="long"?"Long":"Short")+" OB"+(b.status==="angetestet"?" · angetestet":"");
+  // Beschriftung nur, wenn sie nicht über einer anderen Beschriftung liegt
+  const ok=!labelsDrawn.some(p=>Math.abs(p.y-(y1+4))<16&&Math.abs(p.x-(x0+6))<170);
+  if(ok){pill(x0+6,y1+4,label,col,f2);labelsDrawn.push({x:x0+6,y:y1+4});}
 }
 
 function draw(){
@@ -283,8 +294,11 @@ function draw(){
       zoneBox(b,cs,cw,W,padR,y,cl,"H1",true);
     });
   }
-  m.frames[frame].blocks.forEach(b=>{
-    if(b.hi<lo||b.lo>hi)return;
+  // nur die 4 Zonen nahe am aktuellen Kurs, sonst wird der Chart zu voll
+  labelsDrawn=[];
+  const pNow=cs[cs.length-1].c;
+  const dist=b=>b.hi<pNow?pNow-b.hi:b.lo>pNow?b.lo-pNow:0;
+  m.frames[frame].blocks.filter(b=>!(b.hi<lo||b.lo>hi)).sort((p,q)=>dist(p)-dist(q)).slice(0,4).forEach(b=>{
     zoneBox(b,cs,cw,W,padR,y,cl,null,false);
   });
 
@@ -316,11 +330,16 @@ function draw(){
   }
 
   const inR=p=>p>=lo&&p<=hi;
-  tradesFor(m,frame).forEach(({b,t})=>{
+  // nur die 2 neuesten Testtrades mit Einstieg im sichtbaren Bild, sonst wird es unübersichtlich
+  tradesFor(m,frame).filter(x=>num(x.t.ejT)&&x.t.ejT>=cs[0].t).sort((p,q)=>q.t.ejT-p.t.ejT).slice(0,2).forEach(({b,t})=>{
     if(!(t.s==="ziel"||t.s==="stop"||t.s==="offen"))return;
+    if(t.ejT<cs[0].t)return; // Einstieg liegt vor dem sichtbaren Ausschnitt: nicht einzeichnen (steht weiter in der Liste)
     const vi=cs.findIndex(c=>c.t>=t.ejT);
     if(vi<0)return;
-    const x0=vi*cw+cw/2,x1=W-padR;
+    const x0=vi*cw+cw/2;
+    // Linien nur bis zum Ausstieg (bei offenen Trades bis zum rechten Rand)
+    const xi=t.exitT!=null?cs.findIndex(c=>c.t>=t.exitT):-1;
+    const x1=xi>=vi?xi*cw+cw/2:W-padR;
     const L=b.kind==="long";
     const hline=(p,col,dash,w)=>{
       if(!inR(p))return;
@@ -339,17 +358,20 @@ function draw(){
     if(inR(t.entry)){
       ctx.fillStyle="rgba(255,255,255,.85)";
       ctx.textAlign="left";
-      ctx.fillText((L?"Long":"Short")+" Einstieg "+fx(t.entry,m),x0+4,y(t.entry)-4);
+      const et=(L?"Long":"Short")+" Einstieg "+fx(t.entry,m);
+      const ex=Math.max(4,Math.min(x0+4,W-padR-ctx.measureText(et).width-4));
+      ctx.fillText(et,ex,y(t.entry)-4);
     }
     const res=t.s==="ziel"?"✓ 1:1 erreicht":t.s==="stop"?"✗ Stop":"offen "+(t.openR>=0?"+":"")+t.openR.toFixed(2).replace(".",",")+" R";
     const col=t.s==="ziel"?"#4ade80":t.s==="stop"?"#fb7185":"#eab308";
-    ctx.font="600 11px system-ui,sans-serif";
+    ctx.font="600 10px system-ui,sans-serif";
     const rw=ctx.measureText(res).width+12;
     const ry=inR(t.tgt)?y(t.tgt)-19:padT+2;
+    const rx=Math.max(4,Math.min(x1-rw/2,W-padR-rw-2));
     ctx.fillStyle="rgba(9,12,19,.88)";
-    ctx.fillRect(x1-rw-2,ry,rw,17);
+    ctx.fillRect(rx,ry,rw,17);
     ctx.fillStyle=col;
-    ctx.fillText(res,x1-rw+4,ry+12);
+    ctx.fillText(res,rx+6,ry+12);
   });
 
   ctx.font="10px system-ui,sans-serif";
