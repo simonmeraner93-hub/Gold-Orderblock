@@ -182,9 +182,13 @@ function tradesFor(m,f){
   return m.frames[f].blocks.map(b=>({b:b,t:paperTrade(b,cs,f)}));
 }
 
+// Daten direkt aus dem Repo holen (ohne GitHub-Pages-Verzögerung), sonst die lokale Kopie
+const RAW="https://raw.githubusercontent.com/simonmeraner93-hub/Gold-Orderblock/main/docs/data.json";
 async function load(){
   try{
-    const r=await fetch("data.json?"+Date.now());
+    let r;
+    try{r=await fetch(RAW+"?"+Date.now(),{cache:"no-store"});if(!r.ok)throw new Error("raw "+r.status);}
+    catch(_){r=await fetch("data.json?"+Date.now(),{cache:"no-store"});}
     DATA=await r.json();
     render();
   }catch(e){
