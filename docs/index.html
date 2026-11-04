@@ -128,31 +128,33 @@ function paperTrade(b,cs,f){
   if(idx<0)return {s:"fenster"};
   const broke=c=>L?c.c<b.lo:c.c>b.hi;
   const touched=c=>L?c.l<=b.hi:c.h>=b.lo;
-  let tj=-1;
+  // Jeder Antest mit roter Gegenkerze zählt. Danach muss innerhalb von CONF eine große Bestätigungskerze kommen.
+  let start;
   if("touch_t" in b){
-    // Antest genau wie beim Alarm: erste Berührung NACH dem Impuls (die Impulskerze selbst zählt nicht)
+    // Antest genau wie beim Alarm: ab der ersten Berührung NACH dem Impuls (die Impulskerze selbst zählt nicht)
     if(b.touch_t==null)return {s:"frisch"};
-    tj=cs.findIndex(c=>c.t>=b.touch_t);
+    start=cs.findIndex(c=>c.t>=b.touch_t);
+    if(start<0)return {s:"frisch"};
   }else{
-    for(let j=idx+3;j<cs.length;j++){
-      if(broke(cs[j]))return {s:"ungueltig"};
-      if(touched(cs[j])){tj=j;break;}
-    }
+    start=idx+3;
   }
-  if(tj<0)return {s:"frisch"};
-  if(broke(cs[tj]))return {s:"ungueltig"};
-  // Antest-Kerze muss gegen die Richtung sein: Long = rot, Short = grün
-  const tc=cs[tj];
-  if(L?!(tc.c<tc.o):!(tc.c>tc.o))return {s:"kein"};
-  let ej=-1;
-  // Bestätigung frühestens auf der Kerze NACH der Antest-Kerze, und sie muss groß sein
-  for(let j=tj+1;j<Math.min(cs.length,tj+1+CONF[f]);j++){
-    if(broke(cs[j]))return {s:"ungueltig"};
-    const c=cs[j],p=cs[j-1];
+  let armed=-1,touchedAny=false,redTouch=false,ej=-1;
+  for(let j=start;j<cs.length;j++){
+    const c=cs[j];
+    if(broke(c))return {s:"ungueltig"};
+    const hit=touched(c);
+    const red=L?c.c<c.o:c.c>c.o;
+    if(hit)touchedAny=true;
+    if(hit&&red){armed=j;redTouch=true;continue;}
+    if(armed<0||j-armed>CONF[f])continue;
+    const p=cs[j-1];
     const big=Math.abs(c.c-c.o)>=STRONG*bodyAvg(cs,j);
     if(big&&(L?(c.c>c.o&&c.c>p.h):(c.c<c.o&&c.c<p.l))){ej=j;break;}
   }
-  if(ej<0)return {s:"warte"};
+  if(ej<0){
+    if(!touchedAny)return {s:"frisch"};
+    return {s:redTouch?"warte":"kein"};
+  }
   const ec=cs[ej];
   const e=ec.c;
   const stop=L?b.lo:b.hi;
