@@ -102,6 +102,8 @@ let DATA=null,frame="M5",cur="gold",NC={M5:60,H1:60};
 let labelsDrawn=[];
 const STEPS=[30,45,60,90,150];
 const CONF={M5:12,H1:6};
+const STRONG=1.5; // Bestätigungskerze muss so groß sein wie der Impuls (x Durchschnittskörper der letzten 20)
+function bodyAvg(cs,j){let s=0,n=0;for(let q=Math.max(0,j-20);q<j;q++){s+=Math.abs(cs[q].c-cs[q].o);n++;}return n?s/n:0;}
 try{const s=localStorage.getItem("mk");if(s)cur=s;}catch(e){}
 const cv=document.getElementById("cv");
 const ctx=cv.getContext("2d");
@@ -118,7 +120,7 @@ function lastPrice(m){const cs=m.frames.M5.candles;return cs[cs.length-1].c;}
 function num(v){return typeof v==="number"&&isFinite(v);}
 
 // Testtrade 1:1 nach derselben Regel wie der Backtest:
-// Zone angetestet, dann Bestätigungskerze in Trendrichtung (schließt über/unter der Vorkerze),
+// Zone angetestet mit Gegenkerze (Long: rot), dann große Bestätigungskerze in Trendrichtung (schließt über/unter der Vorkerze),
 // Einstieg zum Schluss dieser Kerze, Stop an der Zonenkante, Ziel = gleicher Abstand.
 function paperTrade(b,cs,f){
   const L=b.kind==="long";
@@ -139,12 +141,16 @@ function paperTrade(b,cs,f){
   }
   if(tj<0)return {s:"frisch"};
   if(broke(cs[tj]))return {s:"ungueltig"};
+  // Antest-Kerze muss gegen die Richtung sein: Long = rot, Short = grün
+  const tc=cs[tj];
+  if(L?!(tc.c<tc.o):!(tc.c>tc.o))return {s:"kein"};
   let ej=-1;
-  // Bestätigung frühestens auf der Kerze NACH der Antest-Kerze
+  // Bestätigung frühestens auf der Kerze NACH der Antest-Kerze, und sie muss groß sein
   for(let j=tj+1;j<Math.min(cs.length,tj+1+CONF[f]);j++){
     if(broke(cs[j]))return {s:"ungueltig"};
     const c=cs[j],p=cs[j-1];
-    if(L?(c.c>c.o&&c.c>p.h):(c.c<c.o&&c.c<p.l)){ej=j;break;}
+    const big=Math.abs(c.c-c.o)>=STRONG*bodyAvg(cs,j);
+    if(big&&(L?(c.c>c.o&&c.c>p.h):(c.c<c.o&&c.c<p.l))){ej=j;break;}
   }
   if(ej<0)return {s:"warte"};
   const ec=cs[ej];
@@ -406,6 +412,7 @@ function list(){
     offen:"","warte":"Angetestet, keine Bestätigung",
     frisch:"Noch nicht angetestet",
     ungueltig:"Zone durchbrochen",
+    kein:"Antest nicht mit Gegenkerze",
     fenster:"Außerhalb des Fensters"
   };
   $("list").innerHTML=rows.map(({b,t})=>{
