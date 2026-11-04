@@ -1,0 +1,17 @@
+{
+  "name": "Orderblock Radar",
+  "short_name": "OB",
+  "description": "Orderblock-Radar für Gold, Nasdaq, EUR/USD, GBP/USD und DAX",
+  "lang": "de",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090c13",
+  "theme_color": "#090c13",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icon-180.png", "sizes": "180x180", "type": "image/png"}
+  ]
+}
