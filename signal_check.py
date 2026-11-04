@@ -320,13 +320,23 @@ def entry_check(df, times, b, tf):
     if j0 is None:
         return None
     long_ = b["kind"] == "long"
-    for j in range(j0, min(j0 + 1 + CONF_WAIT[tf], len(df))):
+    body = (df.close - df.open).abs()
+    armed = None  # letzte rote Antest-Kerze; jeder Antest zaehlt
+    for j in range(j0, len(df)):
         c = df.iloc[j]
         if (long_ and c.close < b["lo"]) or (not long_ and c.close > b["hi"]):
             return None  # Zone durchbrochen
-        if j == j0:
+        touched = c.low <= b["hi"] if long_ else c.high >= b["lo"]
+        red = c.close < c.open if long_ else c.close > c.open
+        if touched and red:
+            armed = j
+            continue
+        if armed is None or j - armed > CONF_WAIT[tf]:
             continue
         p = df.iloc[j - 1]
+        avg_b = body.iloc[max(0, j - 20):j].mean()
+        if abs(c.close - c.open) < STRONG * avg_b:
+            continue  # Bestaetigungskerze muss gross sein (wie der Impuls)
         if long_ and c.close > c.open and c.close > p.high:
             return j
         if not long_ and c.close < c.open and c.close < p.low:

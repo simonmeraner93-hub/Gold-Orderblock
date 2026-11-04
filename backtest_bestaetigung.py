@@ -39,30 +39,24 @@ def simulate_conf(d, b, tf, spread, mode="block"):
     zlo, zhi = lo[k], hi[k]
     if zhi - zlo <= 0:
         return None
-    touch = None
-    for j in range(i + 1, min(i + 2 + bs.WAIT[tf], n)):   # Antest ab der Kerze nach dem Impuls (wie der Bot)
+    entry_j = None
+    armed = None   # letzte rote Antest-Kerze; jeder Antest zaehlt
+    for j in range(i + 1, min(i + 2 + bs.WAIT[tf], n)):   # ab der Kerze nach dem Impuls (wie der Bot)
         if (kind == 1 and c[j] < zlo) or (kind == -1 and c[j] > zhi):
             return None                       # Block durchbrochen
         if mode == "fvg":
             hit = (lo[j] <= lo[i + 1]) if kind == 1 else (hi[j] >= hi[i + 1])
         else:
             hit = (lo[j] <= zhi) if kind == 1 else (hi[j] >= zlo)
-        if hit:
-            touch = j
-            break
-    if touch is None:
-        return None
-    entry_j = None
-    # Antest-Kerze muss gegen die Richtung sein (Long: rot, Short: gruen)
-    if (kind == 1 and not c[touch] < o[touch]) or (kind == -1 and not c[touch] > o[touch]):
-        return None
-    # Bestaetigung frueehstens auf der Kerze NACH der Antest-Kerze, und sie muss gross sein
-    for j in range(touch + 1, min(touch + 1 + CONF_WAIT[tf], n)):
-        if (kind == 1 and c[j] < zlo) or (kind == -1 and c[j] > zhi):
-            return None
+        red = (c[j] < o[j]) if kind == 1 else (c[j] > o[j])
+        if hit and red:
+            armed = j                         # Antest mit Gegenkerze, jeder zaehlt
+            continue
+        if armed is None or j - armed > CONF_WAIT[tf]:
+            continue
         avg_b = np.mean(np.abs(c[max(0, j - 20):j] - o[max(0, j - 20):j]))
         if abs(c[j] - o[j]) < CONF_BODY * avg_b:
-            continue
+            continue                          # Bestaetigung muss gross sein
         if kind == 1 and c[j] > o[j] and c[j] > hi[j - 1]:
             entry_j = j
             break
