@@ -20,6 +20,7 @@ STRONG = 1.5
 FVG_MIN = 0.25    # Fair Value Gap muss mindestens so gross sein wie dieser Anteil der durchschnittlichen Kerzenkoerper
 GROUP_MAX = 2     # so viele kleine Fortsetzungskerzen duerfen zwischen Block und Impuls liegen
 ADJACENT = True   # Orderblock muss die Kerze direkt vor dem Impuls sein (dann hängt das FVG am Block)
+CONF_WAIT = {"M5": 12, "H1": 6}   # Kerzen nach dem ersten Antest, in denen die Bestaetigung kommen darf (nie auf der Antest-Kerze selbst)
 SWING = 10
 SHOW = 150
 WINDOW_MIN = 30
@@ -313,6 +314,26 @@ def rel_txt(trend, kind):
     return "mit dem Trend ✓" if kind == trend else "GEGEN den Trend ⚠"
 
 
+def entry_check(df, times, b, tf):
+    """Index der Bestaetigungskerze oder None. Bestaetigung fruehestens auf der Kerze NACH dem ersten Antest."""
+    j0 = next((j for j, t in enumerate(times) if t >= b["touch_t"]), None)
+    if j0 is None:
+        return None
+    long_ = b["kind"] == "long"
+    for j in range(j0, min(j0 + 1 + CONF_WAIT[tf], len(df))):
+        c = df.iloc[j]
+        if (long_ and c.close < b["lo"]) or (not long_ and c.close > b["hi"]):
+            return None  # Zone durchbrochen
+        if j == j0:
+            continue
+        p = df.iloc[j - 1]
+        if long_ and c.close > c.open and c.close > p.high:
+            return j
+        if not long_ and c.close < c.open and c.close < p.low:
+            return j
+    return None
+
+
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
     order = ([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
@@ -416,6 +437,41 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 ]))
                 state[skey] = now.timestamp()
 
+        # ---- Einstieg-Meldungen (Bestaetigungskerze nach dem Antest, nur Signal, keine Order) ----
+        for tf, (df, full_tf, mins) in dfs.items():
+            times = [int(x.timestamp()) for x in df.time]
+            for b in blocks[tf]:
+                if b["status"] != "angetestet" or b["touch_t"] is None:
+                    continue
+                if ADJACENT and not b["adj"]:
+                    continue
+                if b["fvg_known"] and not b["fvg"]:
+                    continue
+                j = entry_check(df, times, b, tf)
+                if j is None or times[j] + mins * 60 < cutoff.timestamp():
+                    continue
+                skey = f"{epic}-{tf}-{b['kind']}-{b['t']}-entry"
+                if skey in state:
+                    continue
+                long_ = b["kind"] == "long"
+                price = float(df.iloc[j].close)
+                stop = b["lo"] if long_ else b["hi"]
+                risk = abs(price - stop)
+                if not risk > 0:
+                    continue
+                tgt = price + risk if long_ else price - risk
+                icon = "🟢" if long_ else "🔴"
+                fv = "✓" if b["fvg"] else "?"
+                tg("\n".join([
+                    f"📍 {name.upper() if key == 'gold' else name}: EINSTIEG-Signal {'Long' if long_ else 'Short'} ({tf}) {icon}",
+                    f"Bestätigungskerze geschlossen bei {price:.{dec}f}",
+                    f"Stop (Zonenkante): {stop:.{dec}f} · 1:1 Ziel: {tgt:.{dec}f}",
+                    f"Zone: {b['lo']:.{dec}f} - {b['hi']:.{dec}f}",
+                    f"H1-Trend: {TRTXT[trend]} · {rel_txt(trend, b['kind'])} · Fair Value Gap: {fv}",
+                    "Nur ein Signal, keine Order.",
+                ]))
+                state[skey] = now.timestamp()
+
     # ---- App-Daten ----
     above = [l for l in levels if l["p"] > last]
     below = [l for l in levels if l["p"] < last]
@@ -435,7 +491,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         for b in vis:
             z = {
                 "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
-                "t": b["t"], "status": b["status"],
+                "t": b["t"], "status": b["status"], "touch_t": b["touch_t"],
                 "fvg": "ja" if b["fvg"] else "offen",
                 "with": trend == "neutral" or b["kind"] == trend,
             }
