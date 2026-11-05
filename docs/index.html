@@ -63,6 +63,16 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 .pt.offen{color:var(--warn)}
 .pt.none{color:var(--mut)}
 .mut{color:var(--mut)}
+.tabs{display:flex;gap:8px;margin-bottom:4px}
+table.t{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+table.t th{font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em;text-align:right;padding:2px 4px 6px}
+table.t td{padding:8px 4px;border-top:1px solid var(--line);text-align:right}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t tr.tot td{font-weight:650}
+.win{color:var(--long)}
+.loss{color:var(--short)}
+.tl{padding:9px 2px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;font-size:14px}
+.tl:first-of-type{border-top:0}
 </style>
 </head>
 <body>
@@ -72,6 +82,12 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <div id="upd">Lade…</div>
   </header>
 
+  <div class="tabs">
+    <button class="btn on" data-v="main">Charts</button>
+    <button class="btn" data-v="all">Übersicht</button>
+  </div>
+
+  <div id="mainv">
   <div class="sec">Märkte</div>
   <div class="mk" id="ov"></div>
 
@@ -95,6 +111,9 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 
   <div class="sec" id="zt">Zonen</div>
   <div id="list"></div>
+  </div>
+
+  <div id="allp" style="display:none"></div>
 </div>
 
 <script>
@@ -234,6 +253,32 @@ function summary(){
   $("sum").innerHTML="<b>"+z+"</b> Ziele · <b>"+s+"</b> Stops · <b>"+o.length+"</b> offen · Summe abgeschlossen: <b>"+(closedR>=0?"+":"")+closedR+" R</b>"+
     (o.length?" · offen: "+(openSum>=0?"+":"")+openSum.toFixed(2).replace(".",",")+" R":"")+
     "<br><span class='mut'>"+frame+", nur die letzten Kerzen im Chart, ohne Spread</span>";
+}
+
+function allpage(){
+  const ms=VALID();
+  const sgn=v=>(v>=0?"+":"")+v;
+  const tbl=(f,title)=>{
+    let tz=0,ts=0,to=0,rows="";
+    ms.forEach(m=>{
+      const st=m.stats&&m.stats[f];
+      if(!st){rows+='<tr><td>'+m.name+'</td><td colspan="5" class="mut">noch keine Daten</td></tr>';return;}
+      tz+=st.z;ts+=st.s;to+=st.o;
+      const cl=st.z+st.s;
+      rows+='<tr><td>'+m.name+'</td><td class="win">'+st.z+'</td><td class="loss">'+st.s+'</td><td>'+st.o+'</td><td>'+(cl?Math.round(100*st.z/cl)+" %":"–")+'</td><td>'+sgn(st.z-st.s)+' R</td></tr>';
+    });
+    const cl=tz+ts;
+    rows+='<tr class="tot"><td>Gesamt</td><td class="win">'+tz+'</td><td class="loss">'+ts+'</td><td>'+to+'</td><td>'+(cl?Math.round(100*tz/cl)+" %":"–")+'</td><td>'+sgn(tz-ts)+' R</td></tr>';
+    return '<div class="sec">'+title+'</div><div class="card"><table class="t"><tr><th>Markt</th><th>Ziel</th><th>Stop</th><th>Offen</th><th>Quote</th><th>Summe</th></tr>'+rows+'</table></div>';
+  };
+  const all=[];
+  ms.forEach(m=>(m.trades||[]).forEach(t=>all.push({m:m,t:t})));
+  all.sort((a,b)=>b.t.t-a.t.t);
+  const resTxt=t=>t.res==="ziel"?'<span class="win">✓ Ziel</span>':t.res==="stop"?'<span class="loss">✗ Stop</span>':'<span style="color:var(--warn)">offen '+(t.r>=0?"+":"")+t.r.toFixed(2).replace(".",",")+' R</span>';
+  const list=all.slice(0,12).map(x=>'<div class="tl"><span><b>'+x.m.name+'</b> · '+x.t.tf+' · '+(x.t.kind==="long"?"▲ Long":"▼ Short")+'<br><span class="mut" style="font-size:12px">Einstieg '+tm(x.t.t)+'</span></span><span>'+resTxt(x.t)+'</span></div>').join("")||'<p class="mut">Noch keine Trades</p>';
+  $("allp").innerHTML=tbl("M5","M5 · alle Märkte")+tbl("H1","H1 · alle Märkte")+
+    '<div class="sec">Letzte Trades</div><div class="card">'+list+'</div>'+
+    '<div class="note">Testtrades 1:1 ohne Spread, Stop an der Zonenkante, Einstieg nach der Bestätigungskerze. Jeder abgeschlossene Trade (Ziel oder Stop) wird dauerhaft gespeichert und bleibt in der Statistik, auch wenn seine Zone längst aus dem Chart verschwunden ist. '+(DATA.log_since?'Statistik seit '+new Date(DATA.log_since).toLocaleDateString("de-DE")+' (der erste Lauf zählte die Trades der davor liegenden Stunden mit). ':'')+'Quote = Ziele von allen abgeschlossenen Trades. Summe: Ziel = +1 R, Stop = −1 R.</div>';
 }
 
 function niceStep(range,n){
@@ -439,7 +484,7 @@ function list(){
 function render(){
   if(!DATA)return;
   const err=[];
-  [overview,info,summary,list,draw].forEach(fn=>{
+  [overview,info,summary,list,draw,allpage].forEach(fn=>{
     try{fn();}catch(e){err.push(fn.name+": "+e.message);console.error(e);}
   });
   let u="Stand: "+new Date(DATA.updated).toLocaleString("de-DE");
@@ -447,6 +492,14 @@ function render(){
   $("upd").textContent=u;
 }
 
+document.querySelector(".tabs").addEventListener("click",e=>{
+  const t=e.target.closest("button[data-v]");
+  if(!t)return;
+  document.querySelectorAll("button[data-v]").forEach(b=>b.classList.toggle("on",b===t));
+  $("mainv").style.display=t.dataset.v==="main"?"":"none";
+  $("allp").style.display=t.dataset.v==="all"?"":"none";
+  if(t.dataset.v==="main")draw();
+});
 document.querySelector(".card").addEventListener("click",e=>{
   const t=e.target.closest("button[data-f]");
   if(!t)return;
