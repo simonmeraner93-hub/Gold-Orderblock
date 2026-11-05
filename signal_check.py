@@ -24,6 +24,7 @@ CONF_WAIT = {"M5": 12, "H1": 6}   # Kerzen nach dem ersten Antest, in denen die 
 SWING = 10
 SHOW = 150
 WINDOW_MIN = 30
+LOG_KEEP_DAYS = 14   # so lange bleiben einzelne Testtrades in data.json, danach nur noch als Zaehler im Archiv
 STATE_FILE = "sent.json"
 SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
 
@@ -344,6 +345,64 @@ def entry_check(df, times, b, tf):
     return None
 
 
+def paper_stats(dfs, blocks_all):
+    """Testtrades 1:1 ueber alle Zonen der geladenen Kerzen - auch ueber Zonen, die danach
+    durchbrochen wurden (sonst wuerden gerade die Stops fehlen). Regeln wie beim Einstiegsalarm."""
+    stats, trades = {}, []
+    for tf, (df, full, mins) in dfs.items():
+        times = [int(x.timestamp()) for x in df.time]
+        z = sl = o = 0
+        open_r = 0.0
+        for b in blocks_all[tf]:
+            if b["touch_t"] is None:
+                continue
+            if ADJACENT and not b["adj"]:
+                continue
+            if b["fvg_known"] and not b["fvg"]:
+                continue
+            j = entry_check(df, times, b, tf)
+            if j is None:
+                continue
+            long_ = b["kind"] == "long"
+            price = float(df.iloc[j].close)
+            stop = b["lo"] if long_ else b["hi"]
+            risk = abs(price - stop)
+            if not risk > 0:
+                continue
+            tgt = price + risk if long_ else price - risk
+            ec = df.iloc[j]
+            res = "offen"
+            if (long_ and ec.low <= stop) or (not long_ and ec.high >= stop):
+                res = "stop"
+            else:
+                for k in range(j + 1, len(full)):
+                    c = full.iloc[k]
+                    hit_stop = c.low <= stop if long_ else c.high >= stop
+                    hit_tgt = c.high >= tgt if long_ else c.low <= tgt
+                    if hit_stop:
+                        res = "stop"
+                        break
+                    if hit_tgt:
+                        res = "ziel"
+                        break
+            if res == "ziel":
+                z += 1
+                r = 1.0
+            elif res == "stop":
+                sl += 1
+                r = -1.0
+            else:
+                o += 1
+                last = float(full.iloc[-1].close)
+                r = ((last - price) if long_ else (price - last)) / risk
+                open_r += r
+            trades.append({"id": f"{tf}-{b['kind']}-{b['t']}", "tf": tf, "kind": b["kind"],
+                           "t": times[j], "res": res, "r": round(r, 2)})
+        stats[tf] = {"z": z, "s": sl, "o": o, "open_r": round(open_r, 2)}
+    trades.sort(key=lambda x: x["t"], reverse=True)
+    return stats, trades
+
+
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
     order = ([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
@@ -369,6 +428,11 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
 
     dfs = {"M5": (m5c, m5_full, 5), "H1": (h1c, h1_full, 60)}
     blocks = {tf: find_blocks(dfs[tf][0]) for tf in dfs}
+    blocks_all = {tf: list(v) for tf, v in blocks.items()}  # fuer die Statistik, bevor auf das sichtbare Fenster gekuerzt wird
+    # nur Zonen aus dem sichtbaren Zeitfenster (gleich wie in der App) - Alarme und Chart bleiben so deckungsgleich
+    for tf, (_d, full_tf0, _m) in dfs.items():
+        t0 = int(full_tf0.iloc[-SHOW:].iloc[0].time.timestamp())
+        blocks[tf] = [b for b in blocks[tf] if b["t"] >= t0]
     valid_h1 = [b for b in blocks["H1"] if b["status"] != "ungueltig"]
 
     # Antest durch die noch laufende Kerze sofort erkennen (nicht erst nach Kerzenschluss)
@@ -516,10 +580,69 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
             "l": round(float(r.low), dec), "c": round(float(r.close), dec),
         } for r in shown.itertuples()]
         frames[tf] = {"candles": candles, "blocks": zones}
+    try:
+        stats, trades = paper_stats(dfs, blocks_all)
+    except Exception as e:
+        print(name, "Statistik-Fehler:", e)
+        stats, trades = {}, []
     return {
         "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend,
         "price": round(last, dec), "levels": levels, "keyl": keyl, "frames": frames,
+        "stats": stats, "trades": trades,
     }
+
+
+def merge_log(prev, markets, now):
+    """Sammelt die Testtrades dauerhaft: Ein abgeschlossener Trade (Ziel/Stop) wird nie mehr veraendert
+    und faellt auch nicht heraus, wenn seine Zone aus dem Kerzenfenster rutscht. Aeltere Trades werden
+    nach LOG_KEEP_DAYS nur noch als Zaehler im Archiv geführt."""
+    log = {x["id"]: x for x in prev.get("log", []) if "id" in x and "key" in x}
+    archive = prev.get("archive", {})
+    since = prev.get("log_since") or now.isoformat()
+    cutoff = now.timestamp() - LOG_KEEP_DAYS * 86400
+    for m in markets:
+        if m.get("stale") or not isinstance(m.get("trades"), list):
+            continue
+        seen = set()
+        for t in m["trades"]:
+            tid = m["key"] + "-" + t["id"]
+            seen.add(tid)
+            if t["t"] < cutoff:
+                continue                      # schon im Archiv oder zu alt
+            old = log.get(tid)
+            if old is None or old["res"] == "offen":
+                log[tid] = {"id": tid, "key": m["key"], "tf": t["tf"], "kind": t["kind"],
+                            "t": t["t"], "res": t["res"], "r": t["r"]}
+        for tid, t in log.items():            # offen, aber nicht mehr berechenbar -> nicht zaehlen
+            if t["key"] == m["key"] and t["res"] == "offen" and tid not in seen:
+                t["res"] = "unklar"
+    for tid in list(log):                     # alte, abgeschlossene Trades ins Archiv
+        t = log[tid]
+        if t["t"] < cutoff and t["res"] != "offen":
+            if t["res"] in ("ziel", "stop"):
+                a = archive.setdefault(t["key"], {}).setdefault(t["tf"], {"z": 0, "s": 0})
+                a["z" if t["res"] == "ziel" else "s"] += 1
+            del log[tid]
+    for m in markets:
+        st = {}
+        for tf in ("M5", "H1"):
+            a = archive.get(m["key"], {}).get(tf, {"z": 0, "s": 0})
+            z, sl, o, orr = a["z"], a["s"], 0, 0.0
+            for t in log.values():
+                if t["key"] != m["key"] or t["tf"] != tf:
+                    continue
+                if t["res"] == "ziel":
+                    z += 1
+                elif t["res"] == "stop":
+                    sl += 1
+                elif t["res"] == "offen":
+                    o += 1
+                    orr += t["r"]
+            st[tf] = {"z": z, "s": sl, "o": o, "open_r": round(orr, 2)}
+        m["stats"] = st
+        m["trades"] = sorted((t for t in log.values() if t["key"] == m["key"] and t["res"] != "unklar"),
+                             key=lambda x: x["t"], reverse=True)[:30]
+    return list(log.values()), archive, since
 
 
 def main():
@@ -529,9 +652,10 @@ def main():
     state = load_state()
     try:
         with open("docs/data.json") as f:
-            old = {m["key"]: m for m in json.load(f).get("markets", [])}
+            prev = json.load(f)
+        old = {m["key"]: m for m in prev.get("markets", [])}
     except Exception:
-        old = {}
+        prev, old = {}, {}
     h = login()
     out = []
     for key, name, cands, dec, step in MARKETS:
@@ -547,8 +671,14 @@ def main():
                 o["stale"] = True
                 out.append(o)
     os.makedirs("docs", exist_ok=True)
+    try:
+        log, archive, since = merge_log(prev, out, now)
+    except Exception as e:
+        print("Log-Fehler:", e)
+        log, archive, since = prev.get("log", []), prev.get("archive", {}), prev.get("log_since")
     with open("docs/data.json", "w") as f:
-        json.dump({"updated": now.isoformat(), "markets": out}, f)
+        json.dump({"updated": now.isoformat(), "markets": out, "log": log,
+                   "archive": archive, "log_since": since}, f, separators=(",", ":"))
     save_state(state)
 
 
