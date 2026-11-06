@@ -358,6 +358,33 @@ def entry_check(df, times, b, tf):
     return None
 
 
+def early_check(df, times, b, tf):
+    """Frueh-Signal: Kerze in Gegenrichtung beruehrt den Block, die direkt danach folgende Kerze ist gross und
+    dreht zurueck (Short: gruen rein, dann gross rot; Long spiegelbildlich). Gibt deren Index oder None."""
+    j0 = next((j for j, t in enumerate(times) if t >= b["touch_t"]), None)
+    if j0 is None:
+        return None
+    long_ = b["kind"] == "long"
+    body = (df.close - df.open).abs()
+    for j in range(max(j0 + 1, 1), len(df)):
+        c = df.iloc[j]
+        p = df.iloc[j - 1]
+        if (long_ and c.close < b["lo"]) or (not long_ and c.close > b["hi"]):
+            return None  # Zone durchbrochen
+        if long_:
+            p_ok = p.low <= b["hi"] and p.close < p.open   # rote Kerze laeuft von oben in den Block
+            c_ok = c.close > c.open                         # gruene grosse Kerze
+        else:
+            p_ok = p.high >= b["lo"] and p.close > p.open  # gruene Kerze laeuft von unten in den Block
+            c_ok = c.close < c.open                         # rote grosse Kerze
+        if not (p_ok and c_ok):
+            continue
+        avg_b = body.iloc[max(0, j - 20):j].mean()
+        if abs(c.close - c.open) >= STRONG * avg_b:
+            return j
+    return None
+
+
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
     order = ([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
@@ -473,6 +500,31 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 tg(alert_msg(name_disp, tf, icon, f"📍 {'Long' if long_ else 'Short'} Einstieg",
                              dec, b, trend, sw,
                              extra=[f"Einstieg {price:.{dec}f}"]))
+                state[skey] = now.timestamp()
+
+        # ---- Frueh-Meldungen (gruene Kerze in den Block, dann gleich grosse rote Kerze; nur Signal) ----
+        for tf, (df, full_tf, mins) in dfs.items():
+            times = [int(x.timestamp()) for x in df.time]
+            for b in blocks[tf]:
+                if b["status"] != "angetestet" or b["touch_t"] is None:
+                    continue
+                if ADJACENT and not b["adj"]:
+                    continue
+                if b["fvg_known"] and not b["fvg"]:
+                    continue
+                j = early_check(df, times, b, tf)
+                if j is None or times[j] + mins * 60 < cutoff.timestamp():
+                    continue
+                skey = f"{epic}-{tf}-{b['kind']}-{b['t']}-early"
+                if skey in state:
+                    continue
+                long_ = b["kind"] == "long"
+                price = float(df.iloc[j].close)
+                icon = "🟢" if long_ else "🔴"
+                sw = sweep_info(df, b, levels, "letzten 4 Std." if tf == "M5" else "letzten 2 Tage")
+                tg(alert_msg(name_disp, tf, icon,
+                             f"⚡ {'Long' if long_ else 'Short'} Früh-Einstieg",
+                             dec, b, trend, sw, extra=[f"Einstieg {price:.{dec}f}"]))
                 state[skey] = now.timestamp()
 
     # ---- App-Daten ----
