@@ -69,6 +69,12 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 .ok{color:var(--long);font-weight:600}
 .no{color:var(--short);font-weight:600}
 .q{color:var(--warn);font-weight:600}
+.st-h{font-size:13px;font-weight:600;margin:2px 0 6px}
+.stt{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+.stt th,.stt td{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.stt th{color:var(--mut);font-weight:600}
+.stt tr.tot td{font-weight:600;border-bottom:0}
+.stt .mut{font-size:11px}
 </style>
 </head>
 <body>
@@ -77,6 +83,9 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <h1>Orderblock Radar</h1>
     <div id="upd">Lade…</div>
   </header>
+
+  <div class="sec">Übersicht</div>
+  <div class="card" id="ovst"></div>
 
   <div class="sec">Märkte</div>
   <div class="mk" id="ov"></div>
@@ -94,6 +103,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <div class="note">Testtrade 1:1 ohne Spread, Stop an der Zonenkante. Der Einstieg erscheint erst nach der Bestätigungskerze.</div>
     <label class="tog"><input type="checkbox" id="lv"> Tageshoch und Tagestief</label>
     <label class="tog"><input type="checkbox" id="hz"> H1-Zonen im M5-Chart</label>
+    <label class="tog"><input type="checkbox" id="ema13" checked> EMA 13 (violett) im Chart</label>
   </div>
 
   <div class="sec">Testtrades 1:1</div>
@@ -239,15 +249,37 @@ function summary(){
   const openSum=o.reduce((a,t)=>a+t.openR,0);
   $("sum").innerHTML="<b>"+z+"</b> Ziele · <b>"+s+"</b> Stops · <b>"+o.length+"</b> offen · Summe abgeschlossen: <b>"+(closedR>=0?"+":"")+closedR+" R</b>"+
     (o.length?" · offen: "+(openSum>=0?"+":"")+openSum.toFixed(2).replace(".",",")+" R":"")+
-    "<br><span class='mut'>"+frame+", nur die letzten Kerzen im Chart, ohne Spread</span>"+
-    botLine("Bot, Hauptregel (14 Tage)",m.stats)+botLine("Bot, EMA-13-Variante (nur Test)",m.ema_stats);
+    "<br><span class='mut'>"+frame+", nur die letzten Kerzen im Chart, ohne Spread</span>";
 }
-// Zeile aus den Bot-Statistiken (persistent, nur wenn der Bot sie schon liefert)
-function botLine(lbl,st){
-  const s=st&&st[frame];if(!s)return"";
+
+// Übersicht oben: 14-Tage-Statistik aus dem Bot (persistent), Hauptregel und EMA-13-Variante
+function statCell(s){
+  if(!s)return'<span class="mut">–</span>';
   const R=(s.open_r>=0?"+":"")+(s.open_r||0).toFixed(2).replace(".",",");
-  return "<br>"+lbl+": <b>"+s.z+"</b> Ziele · <b>"+s.s+"</b> Stops · <b>"+s.o+"</b> offen ("+R+" R)";
+  return '<b>'+s.z+'</b> Ziel · <b>'+s.s+'</b> Stop · <b>'+s.o+'</b> offen<br><span class="mut">'+R+' R</span>';
 }
+function statTotal(ms,key,tf){
+  const t={z:0,s:0,o:0,open_r:0};let any=false;
+  ms.forEach(m=>{const s=m[key]&&m[key][tf];if(!s)return;any=true;t.z+=s.z;t.s+=s.s;t.o+=s.o;t.open_r+=s.open_r||0;});
+  return any?t:null;
+}
+function statTable(title,key,ms){
+  const rows=ms.map(m=>'<tr><td>'+m.name+(m.stale?' · alt':'')+'</td><td>'+statCell(m[key]&&m[key].M5)+'</td><td>'+statCell(m[key]&&m[key].H1)+'</td></tr>').join("");
+  return '<div class="st-h">'+title+'</div><table class="stt"><tr><th>Markt</th><th>M5</th><th>H1</th></tr>'+rows+
+    '<tr class="tot"><td>Gesamt</td><td>'+statCell(statTotal(ms,key,"M5"))+'</td><td>'+statCell(statTotal(ms,key,"H1"))+'</td></tr></table>';
+}
+function statsView(){
+  const ms=(DATA&&DATA.markets)||[];
+  const has=ms.some(m=>m.stats||m.ema_stats);
+  if(!has){$("ovst").innerHTML='<p class="mut">noch keine Daten</p>';return;}
+  $("ovst").innerHTML=statTable("Hauptregel (Bestätigungskerze)","stats",ms)+
+    '<div style="height:14px"></div>'+
+    statTable("EMA-13-Variante (nur Test, kein Alarm)","ema_stats",ms)+
+    '<p class="note">Bot-Speicher der letzten 14 Tage. Ziel = 1:1 erreicht, Stop = Stop getroffen, offen = noch nicht entschieden. R = Summe in Risikoeinheiten, ohne Spread.</p>';
+}
+
+// EMA 13 über die Schlusskurse (wie der Bot), gerechnet über alle geladenen Kerzen
+function emaSeries(cs,n){const k=2/(n+1);const out=[];let e=null;for(const c of cs){e=e===null?c.c:e+(c.c-e)*k;out.push(e);}return out;}
 
 function niceStep(range,n){
   const raw=range/n;
@@ -338,6 +370,17 @@ function draw(){
     const hgt=Math.max(1,Math.abs(y(c.o)-y(c.c)));
     ctx.fillRect(x-Math.max(1,cw*0.36),top,Math.max(2,cw*0.72),hgt);
   });
+
+  if($("ema13").checked){
+    const em=emaSeries(all,13).slice(-cs.length);
+    ctx.strokeStyle="rgba(167,139,250,.95)";
+    ctx.lineWidth=1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    em.forEach((v,i)=>{const x=i*cw+cw/2,yy=y(v);if(i)ctx.lineTo(x,yy);else ctx.moveTo(x,yy);});
+    ctx.stroke();
+    ctx.lineWidth=1;
+  }
 
   if($("lv").checked){
     (m.levels||[]).forEach(l=>{
@@ -470,7 +513,7 @@ function list(){
 function render(){
   if(!DATA)return;
   const err=[];
-  [overview,info,summary,list,draw].forEach(fn=>{
+  [statsView,overview,info,summary,list,draw].forEach(fn=>{
     try{fn();}catch(e){err.push(fn.name+": "+e.message);console.error(e);}
   });
   let u="Stand: "+new Date(DATA.updated).toLocaleString("de-DE");
@@ -500,7 +543,7 @@ $("ov").addEventListener("click",e=>{
   try{localStorage.setItem("mk",cur);}catch(err){}
   render();
 });
-["lv","hz"].forEach(id=>$(id).addEventListener("change",render));
+["lv","hz","ema13"].forEach(id=>$(id).addEventListener("change",render));
 window.addEventListener("resize",draw);
 load();
 setInterval(load,60000);
