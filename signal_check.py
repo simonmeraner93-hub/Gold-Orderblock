@@ -386,9 +386,29 @@ def early_check(df, times, b, tf):
     return None
 
 
-def paper_stats(dfs, blocks_all):
+def ema_entry(df, times, b, tf):
+    """Test-Variante EMA 13 (nur Statistik, kein Alarm): erste Kerze nach dem ersten Antest, die ueber (Long)
+    bzw. unter (Short) dem EMA 13 schliesst. Gleiches Zeitfenster wie die Bestaetigung, damit die Zahlen vergleichbar sind."""
+    if b["touch_t"] is None:
+        return None
+    j0 = next((j for j, t in enumerate(times) if t >= b["touch_t"]), None)
+    if j0 is None:
+        return None
+    long_ = b["kind"] == "long"
+    ema = df.close.ewm(span=13, adjust=False).mean()
+    for j in range(j0 + 1, min(len(df), j0 + 1 + CONF_WAIT[tf])):
+        c = df.iloc[j]
+        if (long_ and c.close < b["lo"]) or (not long_ and c.close > b["hi"]):
+            return None  # Zone durchbrochen
+        if (long_ and c.close > ema.iloc[j]) or (not long_ and c.close < ema.iloc[j]):
+            return j
+    return None
+
+
+def paper_stats(dfs, blocks_all, entry_fn=entry_check, tag=""):
     """Testtrades 1:1 ueber alle Zonen der geladenen Kerzen - auch ueber Zonen, die danach
-    durchbrochen wurden (sonst wuerden gerade die Stops fehlen). Regeln wie beim Einstiegsalarm."""
+    durchbrochen wurden (sonst wuerden gerade die Stops fehlen). Regeln wie beim Einstiegsalarm.
+    entry_fn bestimmt den Einstieg (Standard: Bestaetigungskerze; Variante: EMA 13)."""
     stats, trades = {}, []
     for tf, (df, full, mins) in dfs.items():
         times = [int(x.timestamp()) for x in df.time]
@@ -401,7 +421,7 @@ def paper_stats(dfs, blocks_all):
                 continue
             if b["fvg_known"] and not b["fvg"]:
                 continue
-            j = entry_check(df, times, b, tf)
+            j = entry_fn(df, times, b, tf)
             if j is None:
                 continue
             long_ = b["kind"] == "long"
@@ -437,7 +457,7 @@ def paper_stats(dfs, blocks_all):
                 last = float(full.iloc[-1].close)
                 r = ((last - price) if long_ else (price - last)) / risk
                 open_r += r
-            trades.append({"id": f"{tf}-{b['kind']}-{b['t']}", "tf": tf, "kind": b["kind"],
+            trades.append({"id": f"{tf}-{b['kind']}-{b['t']}" + (f"-{tag}" if tag else ""), "tf": tf, "kind": b["kind"],
                            "t": times[j], "res": res, "r": round(r, 2)})
         stats[tf] = {"z": z, "s": sl, "o": o, "open_r": round(open_r, 2)}
     trades.sort(key=lambda x: x["t"], reverse=True)
@@ -645,6 +665,12 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         print(name, "Statistik-Fehler:", e)
         stats, trades = {}, []
 
+    try:
+        _, ema_trades = paper_stats(dfs, blocks, entry_fn=ema_entry, tag="ema")
+    except Exception as e:
+        print(name, "EMA-Statistik-Fehler:", e)
+        ema_trades = []
+
     # ---- App-Daten ----
     above = [l for l in levels if l["p"] > last]
     below = [l for l in levels if l["p"] < last]
@@ -661,6 +687,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                and (b["adj"] or not ADJACENT)
                and (b["fvg"] or not b["fvg_known"])]
         zones = []
+        times = [int(x.timestamp()) for x in df.time]
+        unit2 = "letzten 4 Std." if tf == "M5" else "letzten 2 Tage"
         for b in vis:
             z = {
                 "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
@@ -668,6 +696,15 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 "fvg": "ja" if b["fvg"] else "offen",
                 "with": trend == "neutral" or b["kind"] == trend,
             }
+            # Checkliste fuer die App: dieselben Regeln wie Telegram und Testtrades
+            z["sweep"] = sweep_info(df, b, levels, unit2)
+            if b["touch_t"] is not None:
+                jc = entry_check(df, times, b, tf)
+                je = early_check(df, times, b, tf)
+                jm = ema_entry(df, times, b, tf)
+                z["conf_t"] = times[jc] if jc is not None else None
+                z["early_t"] = times[je] if je is not None else None
+                z["ema_t"] = times[jm] if jm is not None else None
             if b["fvg"] and not b["fvg_filled"]:
                 z["f_lo"] = round(b["fvg_lo"], dec)
                 z["f_hi"] = round(b["fvg_hi"], dec)
@@ -682,7 +719,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
     return {
         "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend,
         "price": round(last, dec), "levels": levels, "keyl": keyl, "frames": frames,
-        "stats": stats, "trades": trades,
+        "stats": stats, "trades": trades, "ema_trades": ema_trades,
     }
 
 
@@ -717,9 +754,25 @@ def main():
     except Exception as e:
         print("Log-Fehler:", e)
         log, archive, since = prev.get("log", []), prev.get("archive", {}), prev.get("log_since")
+
+    # EMA-13-Variante: eigene Speicherung, nur Statistik (kein Alarm, keine Order)
+    ema_prev = {"log": prev.get("ema_log", []), "archive": prev.get("ema_archive", {}),
+                "log_since": prev.get("ema_log_since")}
+    ema_in = [{"key": m["key"], "stale": m.get("stale", False), "trades": m.get("ema_trades", [])} for m in out]
+    try:
+        elog, earchive, esince = merge_log(ema_prev, ema_in, now)
+    except Exception as e:
+        print("EMA-Log-Fehler:", e)
+        elog, earchive, esince = ema_prev["log"], ema_prev["archive"], ema_prev["log_since"]
+    for m, e in zip(out, ema_in):
+        m["ema_stats"] = e.get("stats", {})
+        m["ema_trades"] = e.get("trades", [])
+
     with open("docs/data.json", "w") as f:
         json.dump({"updated": now.isoformat(), "markets": out, "log": log,
-                   "archive": archive, "log_since": since}, f, separators=(",", ":"))
+                   "archive": archive, "log_since": since,
+                   "ema_log": elog, "ema_archive": earchive, "ema_log_since": esince},
+                  f, separators=(",", ":"))
     save_state(state)
 
 
