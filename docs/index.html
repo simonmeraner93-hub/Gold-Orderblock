@@ -63,16 +63,12 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 .pt.offen{color:var(--warn)}
 .pt.none{color:var(--mut)}
 .mut{color:var(--mut)}
-.tabs{display:flex;gap:8px;margin-bottom:4px}
-table.t{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
-table.t th{font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em;text-align:right;padding:2px 4px 6px}
-table.t td{padding:8px 4px;border-top:1px solid var(--line);text-align:right}
-table.t th:first-child,table.t td:first-child{text-align:left}
-table.t tr.tot td{font-weight:650}
-.win{color:var(--long)}
-.loss{color:var(--short)}
-.tl{padding:9px 2px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;font-size:14px}
-.tl:first-of-type{border-top:0}
+.cl-h{font-size:12px;font-weight:600;color:var(--txt);margin-top:10px}
+.cl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12px;margin-top:4px;color:var(--mut)}
+.cl .v{color:var(--txt);font-variant-numeric:tabular-nums}
+.ok{color:var(--long);font-weight:600}
+.no{color:var(--short);font-weight:600}
+.q{color:var(--warn);font-weight:600}
 </style>
 </head>
 <body>
@@ -82,12 +78,6 @@ table.t tr.tot td{font-weight:650}
     <div id="upd">Lade…</div>
   </header>
 
-  <div class="tabs">
-    <button class="btn on" data-v="main">Charts</button>
-    <button class="btn" data-v="all">Übersicht</button>
-  </div>
-
-  <div id="mainv">
   <div class="sec">Märkte</div>
   <div class="mk" id="ov"></div>
 
@@ -111,9 +101,6 @@ table.t tr.tot td{font-weight:650}
 
   <div class="sec" id="zt">Zonen</div>
   <div id="list"></div>
-  </div>
-
-  <div id="allp" style="display:none"></div>
 </div>
 
 <script>
@@ -252,33 +239,14 @@ function summary(){
   const openSum=o.reduce((a,t)=>a+t.openR,0);
   $("sum").innerHTML="<b>"+z+"</b> Ziele · <b>"+s+"</b> Stops · <b>"+o.length+"</b> offen · Summe abgeschlossen: <b>"+(closedR>=0?"+":"")+closedR+" R</b>"+
     (o.length?" · offen: "+(openSum>=0?"+":"")+openSum.toFixed(2).replace(".",",")+" R":"")+
-    "<br><span class='mut'>"+frame+", nur die letzten Kerzen im Chart, ohne Spread</span>";
+    "<br><span class='mut'>"+frame+", nur die letzten Kerzen im Chart, ohne Spread</span>"+
+    botLine("Bot, Hauptregel (14 Tage)",m.stats)+botLine("Bot, EMA-13-Variante (nur Test)",m.ema_stats);
 }
-
-function allpage(){
-  const ms=VALID();
-  const sgn=v=>(v>=0?"+":"")+v;
-  const tbl=(f,title)=>{
-    let tz=0,ts=0,to=0,rows="";
-    ms.forEach(m=>{
-      const st=m.stats&&m.stats[f];
-      if(!st){rows+='<tr><td>'+m.name+'</td><td colspan="5" class="mut">noch keine Daten</td></tr>';return;}
-      tz+=st.z;ts+=st.s;to+=st.o;
-      const cl=st.z+st.s;
-      rows+='<tr><td>'+m.name+'</td><td class="win">'+st.z+'</td><td class="loss">'+st.s+'</td><td>'+st.o+'</td><td>'+(cl?Math.round(100*st.z/cl)+" %":"–")+'</td><td>'+sgn(st.z-st.s)+' R</td></tr>';
-    });
-    const cl=tz+ts;
-    rows+='<tr class="tot"><td>Gesamt</td><td class="win">'+tz+'</td><td class="loss">'+ts+'</td><td>'+to+'</td><td>'+(cl?Math.round(100*tz/cl)+" %":"–")+'</td><td>'+sgn(tz-ts)+' R</td></tr>';
-    return '<div class="sec">'+title+'</div><div class="card"><table class="t"><tr><th>Markt</th><th>Ziel</th><th>Stop</th><th>Offen</th><th>Quote</th><th>Summe</th></tr>'+rows+'</table></div>';
-  };
-  const all=[];
-  ms.forEach(m=>(m.trades||[]).forEach(t=>all.push({m:m,t:t})));
-  all.sort((a,b)=>b.t.t-a.t.t);
-  const resTxt=t=>t.res==="ziel"?'<span class="win">✓ Ziel</span>':t.res==="stop"?'<span class="loss">✗ Stop</span>':'<span style="color:var(--warn)">offen '+(t.r>=0?"+":"")+t.r.toFixed(2).replace(".",",")+' R</span>';
-  const list=all.slice(0,12).map(x=>'<div class="tl"><span><b>'+x.m.name+'</b> · '+x.t.tf+' · '+(x.t.kind==="long"?"▲ Long":"▼ Short")+'<br><span class="mut" style="font-size:12px">Einstieg '+tm(x.t.t)+'</span></span><span>'+resTxt(x.t)+'</span></div>').join("")||'<p class="mut">Noch keine Trades</p>';
-  $("allp").innerHTML=tbl("M5","M5 · alle Märkte")+tbl("H1","H1 · alle Märkte")+
-    '<div class="sec">Letzte Trades</div><div class="card">'+list+'</div>'+
-    '<div class="note">Testtrades 1:1 ohne Spread, Stop an der Zonenkante, Einstieg nach der Bestätigungskerze. Jeder abgeschlossene Trade (Ziel oder Stop) wird dauerhaft gespeichert und bleibt in der Statistik, auch wenn seine Zone längst aus dem Chart verschwunden ist. '+(DATA.log_since?'Statistik seit '+new Date(DATA.log_since).toLocaleDateString("de-DE")+' (der erste Lauf zählte die Trades der davor liegenden Stunden mit). ':'')+'Quote = Ziele von allen abgeschlossenen Trades. Summe: Ziel = +1 R, Stop = −1 R.</div>';
+// Zeile aus den Bot-Statistiken (persistent, nur wenn der Bot sie schon liefert)
+function botLine(lbl,st){
+  const s=st&&st[frame];if(!s)return"";
+  const R=(s.open_r>=0?"+":"")+(s.open_r||0).toFixed(2).replace(".",",");
+  return "<br>"+lbl+": <b>"+s.z+"</b> Ziele · <b>"+s.s+"</b> Stops · <b>"+s.o+"</b> offen ("+R+" R)";
 }
 
 function niceStep(range,n){
@@ -452,6 +420,24 @@ function draw(){
   ctx.fillText(fx(last,m),W-padR+5,y(last)+4);
 }
 
+// Checkliste pro Zone: dieselben Regeln wie Telegram und Testtrades, mit Uhrzeit
+function checklist(b,m){
+  const Y='<span class="ok">✓</span>',N='<span class="no">✗</span>',Q='<span class="q">?</span>';
+  const tr=m.trend==="neutral"?null:!!b.with;
+  const rows=[
+    ["Antest", b.touch_t?Y+" "+tm(b.touch_t):"noch nicht"],
+    ["Liquidity-Sweep", b.sweep?Y+" "+b.sweep:N],
+    ["H1-Trend", tr===null?Q+" kein klarer Trend":tr?Y+" mit dem Trend":N+" gegen den Trend"],
+    ["FVG", b.fvg==="ja"?Y:Q+" noch nicht bekannt"],
+    ["Bestätigung", b.conf_t?Y+" "+tm(b.conf_t):(b.touch_t?"noch offen":"–")],
+    ["Früh-Einstieg", b.early_t?Y+" "+tm(b.early_t):"–"],
+    ["EMA-13-Test", b.ema_t?Y+" "+tm(b.ema_t):"–"]
+  ];
+  const n=[!!b.touch_t,!!b.sweep,tr===true,b.fvg==="ja",!!b.conf_t].filter(Boolean).length;
+  return '<div class="cl-h">Checkliste · '+n+' von 5 erfüllt</div><div class="cl">'+
+    rows.map(r=>'<span>'+r[0]+'</span><span class="v">'+r[1]+'</span>').join("")+'</div>';
+}
+
 function list(){
   const m=M();if(!m)return;
   $("zt").textContent="Zonen "+m.name+" · "+frame;
@@ -477,14 +463,14 @@ function list(){
     }
     return '<div class="zi '+b.kind+(b.with?'':' ag')+'"><div class="h"><span><b>'+(L?'▲ Long':'▼ Short')+'</b> <span class="r">'+fx(b.lo,m)+' – '+fx(b.hi,m)+'</span></span><span class="st '+(b.status==="angetestet"?"an":"")+'">'+(ST[b.status]||"")+'</span></div>'+
       '<div class="meta">'+tm(b.t)+'</div>'+
-      '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span></div>'+pt+'</div>';
+      '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span></div>'+checklist(b,m)+pt+'</div>';
   }).join("")||'<p class="mut">Keine Zonen in diesem Fenster</p>';
 }
 
 function render(){
   if(!DATA)return;
   const err=[];
-  [overview,info,summary,list,draw,allpage].forEach(fn=>{
+  [overview,info,summary,list,draw].forEach(fn=>{
     try{fn();}catch(e){err.push(fn.name+": "+e.message);console.error(e);}
   });
   let u="Stand: "+new Date(DATA.updated).toLocaleString("de-DE");
@@ -492,14 +478,6 @@ function render(){
   $("upd").textContent=u;
 }
 
-document.querySelector(".tabs").addEventListener("click",e=>{
-  const t=e.target.closest("button[data-v]");
-  if(!t)return;
-  document.querySelectorAll("button[data-v]").forEach(b=>b.classList.toggle("on",b===t));
-  $("mainv").style.display=t.dataset.v==="main"?"":"none";
-  $("allp").style.display=t.dataset.v==="all"?"":"none";
-  if(t.dataset.v==="main")draw();
-});
 document.querySelector(".card").addEventListener("click",e=>{
   const t=e.target.closest("button[data-f]");
   if(!t)return;
