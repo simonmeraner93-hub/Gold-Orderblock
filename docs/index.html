@@ -75,6 +75,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 .stt th{color:var(--mut);font-weight:600}
 .stt tr.tot td{font-weight:600;border-bottom:0}
 .stt .mut{font-size:11px}
+[hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -84,13 +85,21 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <div id="upd">Lade…</div>
   </header>
 
-  <div class="sec">Übersicht</div>
-  <div class="card" id="ovst"></div>
+  <div class="row tabs" style="margin-top:12px">
+    <button class="btn on" data-v="mk">Märkte</button>
+    <button class="btn" data-v="st">Übersicht</button>
+  </div>
 
+  <div id="vSt" hidden>
+    <div class="sec">Übersicht · Gewinnquote</div>
+    <div class="card" id="ovst"></div>
+  </div>
+
+  <div id="vMk">
   <div class="sec">Märkte</div>
   <div class="mk" id="ov"></div>
 
-  <div class="card">
+  <div class="card" id="chart">
     <div class="row">
       <button class="btn on" data-f="M5">M5</button>
       <button class="btn" data-f="H1">H1</button>
@@ -111,6 +120,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 
   <div class="sec" id="zt">Zonen</div>
   <div id="list"></div>
+  </div>
 </div>
 
 <script>
@@ -255,8 +265,10 @@ function summary(){
 // Übersicht oben: 14-Tage-Statistik aus dem Bot (persistent), Hauptregel und EMA-13-Variante
 function statCell(s){
   if(!s)return'<span class="mut">–</span>';
+  const closed=s.z+s.s;
+  const pct=closed>0?Math.round(100*s.z/closed)+' %':'–';
   const R=(s.open_r>=0?"+":"")+(s.open_r||0).toFixed(2).replace(".",",");
-  return '<b>'+s.z+'</b> Ziel · <b>'+s.s+'</b> Stop · <b>'+s.o+'</b> offen<br><span class="mut">'+R+' R</span>';
+  return '<b style="font-size:15px">'+pct+'</b> <span class="mut">('+s.z+' von '+closed+')</span><br>'+s.o+' offen · '+R+' R';
 }
 function statTotal(ms,key,tf){
   const t={z:0,s:0,o:0,open_r:0};let any=false;
@@ -275,7 +287,7 @@ function statsView(){
   $("ovst").innerHTML=statTable("Hauptregel (Bestätigungskerze)","stats",ms)+
     '<div style="height:14px"></div>'+
     statTable("EMA-13-Variante (nur Test, kein Alarm)","ema_stats",ms)+
-    '<p class="note">Bot-Speicher der letzten 14 Tage. Ziel = 1:1 erreicht, Stop = Stop getroffen, offen = noch nicht entschieden. R = Summe in Risikoeinheiten, ohne Spread.</p>';
+    '<p class="note">Bot-Speicher der letzten 14 Tage. Gewinnquote = Ziele ÷ (Ziele + Stops), offene Trades zählen nicht mit. R = Summe in Risikoeinheiten, ohne Spread.</p>';
 }
 
 // EMA 13 über die Schlusskurse (wie der Bot), gerechnet über alle geladenen Kerzen
@@ -521,12 +533,20 @@ function render(){
   $("upd").textContent=u;
 }
 
-document.querySelector(".card").addEventListener("click",e=>{
+$("chart").addEventListener("click",e=>{
   const t=e.target.closest("button[data-f]");
   if(!t)return;
   frame=t.dataset.f;
   document.querySelectorAll("button[data-f]").forEach(b=>b.classList.toggle("on",b===t));
   render();
+});
+document.querySelector(".tabs").addEventListener("click",e=>{
+  const t=e.target.closest("button[data-v]");if(!t)return;
+  document.querySelectorAll("button[data-v]").forEach(b=>b.classList.toggle("on",b===t));
+  const st=t.dataset.v==="st";
+  $("vSt").hidden=!st;$("vMk").hidden=st;
+  if(!st)draw();
+  window.scrollTo(0,0);
 });
 function zoom(dir){
   let i=STEPS.indexOf(NC[frame]);if(i<0)i=2;
