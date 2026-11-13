@@ -10,6 +10,7 @@ Schreibt ausserdem docs/data.json fuer die App.
 import os
 import json
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import requests
 import pandas as pd
 
@@ -194,11 +195,13 @@ def find_blocks(df):
                 hi = float(df.iloc[k:i].high.max())
         status = "frisch"
         touch_j = None
+        inv_t = None   # Zeit der Kerze, die die Zone ungültig gemacht hat (Ende der Zone im Chart)
         for j in range(i + 1, len(df)):
             c = df.iloc[j]
             if kind == "long":
                 if c.close < lo:
                     status = "ungueltig"
+                    inv_t = int(c.time.timestamp())
                     break
                 if c.low <= hi:
                     status = "angetestet"
@@ -207,6 +210,7 @@ def find_blocks(df):
             else:
                 if c.close > hi:
                     status = "ungueltig"
+                    inv_t = int(c.time.timestamp())
                     break
                 if c.high >= lo:
                     status = "angetestet"
@@ -242,7 +246,7 @@ def find_blocks(df):
             "t": int(df.iloc[k].time.timestamp()), "status": status,
             "touch_t": int(df.iloc[touch_j].time.timestamp()) if touch_j is not None else None,
             "fvg": fvg, "fvg_known": known, "adj": adj,
-            "fvg_lo": fl, "fvg_hi": fh, "fvg_t": ft, "fvg_filled": filled,
+            "fvg_lo": fl, "fvg_hi": fh, "fvg_t": ft, "fvg_filled": filled, "inv_t": inv_t,
         })
     return result
 
@@ -679,6 +683,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         "sup": max(below, key=lambda l: l["p"]) if below else None,
     }
     frames = {}
+    # Tagesbeginn (00:00 Rome): die App zeigt den Chart ab hier und alle Blöcke seit dann
+    day_start = int(now.astimezone(ZoneInfo("Europe/Rome")).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
     for tf, (df, full, mins) in dfs.items():
         shown = full.iloc[-SHOW:]
         first_t = int(shown.iloc[0].time.timestamp())
@@ -710,12 +716,22 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 z["f_hi"] = round(b["fvg_hi"], dec)
                 z["f_t"] = b["fvg_t"]
             zones.append(z)
+        # Chart: mindestens die letzten SHOW Kerzen, sonst ab Tagesbeginn (je nachdem was weiter zurückreicht)
+        src = full[full.time >= pd.Timestamp(min(day_start, first_t), unit="s", tz="UTC")]
         candles = [{
             "t": int(r.time.timestamp()),
             "o": round(float(r.open), dec), "h": round(float(r.high), dec),
             "l": round(float(r.low), dec), "c": round(float(r.close), dec),
-        } for r in shown.itertuples()]
-        frames[tf] = {"candles": candles, "blocks": zones}
+        } for r in src.itertuples()]
+        # alle gültigen Zonen seit Tagesbeginn (gleiche Filter wie oben), auch ungültige gedämpft, für die Tagesansicht
+        day_zones = [{
+            "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
+            "t": b["t"], "status": b["status"], "touch_t": b["touch_t"],
+            "inv_t": b["inv_t"],
+            "with": trend == "neutral" or b["kind"] == trend,
+        } for b in blocks[tf]
+          if b["t"] >= day_start and (b["adj"] or not ADJACENT) and (b["fvg"] or not b["fvg_known"])]
+        frames[tf] = {"candles": candles, "blocks": zones, "day": day_zones, "day_start": day_start}
     return {
         "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend,
         "price": round(last, dec), "levels": levels, "keyl": keyl, "frames": frames,
