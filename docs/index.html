@@ -103,7 +103,6 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <div class="row">
       <button class="btn on" data-f="M5">M5</button>
       <button class="btn" data-f="H1">H1</button>
-      <button class="btn" id="tagb">Tag</button>
       <button class="btn z" id="zin">+</button>
       <button class="btn z" id="zout">−</button>
     </div>
@@ -128,7 +127,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 
 <script>
 let DATA=null,frame="M5",cur="gold",NC={M5:60,H1:60};
-let TAG=false,POS={M5:null,H1:null}; // TAG = Tagesansicht, POS = Zeit der linken Kerze (null = ganz rechts)
+let POS={M5:null,H1:null}; // POS = Zeit der linken Kerze im Ausschnitt (null = ganz rechts, neueste Kerze)
 let labelsDrawn=[];
 const STEPS=[30,45,60,90,150];
 const CONF={M5:12,H1:6};
@@ -342,15 +341,9 @@ function zoneBox(b,cs,cw,W,padR,y,cl,prefix,dash){
   if(ok){pill(x0+6,y1+4,label,col,f2);labelsDrawn.push({x:x0+6,y:y1+4});}
 }
 
-// Kerzen im Ausschnitt: Tagesansicht = ab 00:00 (Rome), sonst NC Kerzen, verschoben über POS; POS null = ganz rechts (neueste)
-function winRange(all,m){
+// Kerzen im Ausschnitt: NC Kerzen, verschoben über POS; POS null = ganz rechts (neueste). Die Kerzenliste reicht bis 00:00 zurück.
+function winRange(all){
   const f=frame;
-  if(TAG){
-    const ds=m.frames[f].day_start||0;
-    let s0=all.findIndex(c=>c.t>=ds);
-    if(s0<0)s0=Math.max(0,all.length-1);
-    return [s0,all.length];
-  }
   const n=NC[f],maxS=Math.max(0,all.length-n);
   if(POS[f]==null)return [maxS,all.length];
   let i=all.findIndex(c=>c.t>=POS[f]);
@@ -376,14 +369,12 @@ function draw(){
   ctx.clearRect(0,0,W,H);
   const m=M();if(!m)return;
   const all=m.frames[frame].candles;
-  const [s0,s1]=winRange(all,m);
+  const [s0,s1]=winRange(all);
   const cs=all.slice(s0,s1);
   const maxS=Math.max(0,all.length-NC[frame]);
-  $("tagb").classList.toggle("on",!!TAG);
-  $("posrow").hidden=!!TAG;
-  if(!TAG){const sl=$("pos");sl.max=maxS;sl.value=s0;}
+  const sl=$("pos");sl.max=maxS;sl.value=s0;
   if(!cs.length)return;
-  $("rng").textContent=(TAG?"Ganzer Tag · ":"")+tm(cs[0].t)+" – "+tm(cs[cs.length-1].t);
+  $("rng").textContent=tm(cs[0].t)+" – "+tm(cs[cs.length-1].t);
   let lo=Math.min(...cs.map(c=>c.l)),hi=Math.max(...cs.map(c=>c.h));
   const pad=(hi-lo)*0.08||1;lo-=pad;hi+=pad;
   const padR=64,padT=10,padB=20;
@@ -402,17 +393,16 @@ function draw(){
     ctx.fillText(p.toFixed(dec),W-padR+6,y(p)+4);
   }
 
-  const tagOn=!!TAG;
   if($("hz").checked&&frame==="M5"){
     const h1=m.frames.H1;
-    pickZones(tagOn?(h1.day||[]):h1.blocks.filter(b=>b.status!=="ungueltig"),cs,lo,hi,0).forEach(b=>{
+    pickZones(h1.blocks.concat(h1.day||[]).filter(b=>b.status!=="ungueltig"),cs,lo,hi,0).forEach(b=>{
       zoneBox(b,cs,cw,W,padR,y,cl,"H1",true);
     });
   }
-  // Ausschnitt: die 4 Zonen nahe am Kurs (gültige zuerst, dann ungültige gedämpft); Tagesansicht: alle Zonen des Tages
+  // alle Zonen, die in diesem Ausschnitt schon existierten: gültige bis zum Rand, ungültige bis zu ihrer Bruchkerze
   labelsDrawn=[];
   const fr=m.frames[frame];
-  pickZones(tagOn?(fr.day||[]):fr.blocks.concat(fr.day||[]),cs,lo,hi,tagOn?12:4).forEach(b=>{
+  pickZones(fr.blocks.concat(fr.day||[]),cs,lo,hi,0).forEach(b=>{
     zoneBox(b,cs,cw,W,padR,y,cl,null,false);
   });
 
@@ -456,7 +446,7 @@ function draw(){
 
   const inR=p=>p>=lo&&p<=hi;
   // nur die 2 neuesten Testtrades mit Einstieg im sichtbaren Bild, sonst wird es unübersichtlich
-  tradesFor(m,frame,tagOn?(m.frames[frame].day||[]):undefined).filter(x=>num(x.t.ejT)&&x.t.ejT>=cs[0].t&&x.t.ejT<=cs[cs.length-1].t).sort((p,q)=>q.t.ejT-p.t.ejT).slice(0,tagOn?12:2).forEach(({b,t})=>{
+  tradesFor(m,frame,fr.day||fr.blocks).filter(x=>num(x.t.ejT)&&x.t.ejT>=cs[0].t&&x.t.ejT<=cs[cs.length-1].t).sort((p,q)=>q.t.ejT-p.t.ejT).slice(0,12).forEach(({b,t})=>{
     if(!(t.s==="ziel"||t.s==="stop"||t.s==="offen"))return;
     if(t.ejT<cs[0].t)return; // Einstieg liegt vor dem sichtbaren Ausschnitt: nicht einzeichnen (steht weiter in der Liste)
     const vi=cs.findIndex(c=>c.t>=t.ejT);
@@ -594,7 +584,6 @@ document.querySelector(".tabs").addEventListener("click",e=>{
   window.scrollTo(0,0);
 });
 function zoom(dir){
-  TAG=false;
   let i=STEPS.indexOf(NC[frame]);if(i<0)i=2;
   i=Math.max(0,Math.min(STEPS.length-1,i+dir));
   NC[frame]=STEPS[i];
@@ -602,7 +591,6 @@ function zoom(dir){
 }
 $("zin").addEventListener("click",()=>zoom(-1));
 $("zout").addEventListener("click",()=>zoom(1));
-$("tagb").addEventListener("click",()=>{TAG=!TAG;render();});
 $("pos").addEventListener("input",e=>{
   const m=M();if(!m)return;
   const all=m.frames[frame].candles,v=+e.target.value;
