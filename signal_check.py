@@ -40,14 +40,24 @@ MARKETS = [
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
+APP_URL = "https://simonmeraner93-hub.github.io/Gold-Orderblock/"
 
 
-def tg(text):
+def tg(text, url=None):
+    data = {"chat_id": CHAT, "text": text}
+    if url:
+        # Knopf unter der Meldung: oeffnet den Chart direkt bei dieser Zone
+        data["reply_markup"] = json.dumps({"inline_keyboard": [[{"text": "📊 Chart öffnen", "url": url}]]})
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        data={"chat_id": CHAT, "text": text},
+        data=data,
         timeout=15,
     )
+
+
+def chart_link(key, tf, b):
+    """Link zum Chart der Zone: die App springt direkt zu Markt, Zeitfenster und Zone."""
+    return f"{APP_URL}?m={key}&tf={tf}&z={b['kind']}-{b['t']}"
 
 
 def load_state():
@@ -622,7 +632,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 icon = "🟢" if long_ else "🔴"
                 sw = sweep_info(df, b, levels, "letzten 4 Std." if tf == "M5" else "letzten 2 Tage")
                 tg(alert_msg(name_disp, tf, icon, f"🆕 Neuer {'Long' if long_ else 'Short'}-Orderblock",
-                             dec, b, trend, sw))
+                             dec, b, trend, sw), chart_link(key, tf, b))
                 state[skey] = now.timestamp()
 
         # ---- Antest-Meldungen ----
@@ -644,7 +654,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 icon = "🟢" if long_ else "🔴"
                 sw = sweep_info(df, b, levels, "letzten 4 Std." if tf == "M5" else "letzten 2 Tage")
                 tg(alert_msg(name_disp, tf, icon, f"🎯 {'Long' if long_ else 'Short'} angetestet",
-                             dec, b, trend, sw))
+                             dec, b, trend, sw), chart_link(key, tf, b))
                 state[skey] = now.timestamp()
 
         # ---- Einstieg-Meldungen (Bestaetigungskerze nach dem Antest, nur Signal, keine Order) ----
@@ -674,7 +684,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 sw = sweep_info(df, b, levels, "letzten 4 Std." if tf == "M5" else "letzten 2 Tage")
                 tg(alert_msg(name_disp, tf, icon, f"📍 {'Long' if long_ else 'Short'} Einstieg",
                              dec, b, trend, sw,
-                             extra=[f"Einstieg {price:.{dec}f}"]))
+                             extra=[f"Einstieg {price:.{dec}f}"]), chart_link(key, tf, b))
                 state[skey] = now.timestamp()
 
         # ---- Frueh-Meldungen (gruene Kerze in den Block, dann gleich grosse rote Kerze; nur Signal) ----
@@ -699,7 +709,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 sw = sweep_info(df, b, levels, "letzten 4 Std." if tf == "M5" else "letzten 2 Tage")
                 tg(alert_msg(name_disp, tf, icon,
                              f"⚡ {'Long' if long_ else 'Short'} Früh-Einstieg",
-                             dec, b, trend, sw, extra=[f"Einstieg {price:.{dec}f}"]))
+                             dec, b, trend, sw, extra=[f"Einstieg {price:.{dec}f}"]), chart_link(key, tf, b))
                 state[skey] = now.timestamp()
 
     try:
