@@ -82,6 +82,13 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 .sec2{margin-top:12px;font-weight:600;font-size:13px;color:#9aa4b8}
 .tl{margin-top:6px;display:grid;gap:6px;font-size:13px}
 .tl .tt{display:inline-block;min-width:92px;color:#7c879c}
+.att-bar{display:grid;gap:6px;margin:10px 0}
+.att-bar:empty{display:none}
+.att-it{display:block;width:100%;text-align:left;padding:10px 12px;border-radius:10px;border:1px solid rgba(52,211,153,.5);background:rgba(52,211,153,.12);color:#e5e7eb;font:inherit;font-size:14px}
+.att-note{font-size:13px;color:#9aa4b8}
+.att{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;margin-left:4px}
+.att.e{background:rgba(52,211,153,.18);color:#34d399}
+.att.w{background:rgba(251,191,36,.16);color:#fbbf24}
 </style>
 </head>
 <body>
@@ -103,6 +110,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 
   <div id="vMk">
   <div class="sec">Märkte</div>
+  <div class="att-bar" id="att"></div>
   <div class="mk" id="ov"></div>
 
   <div class="card" id="chart">
@@ -239,7 +247,7 @@ function overview(){
   const m0=M();
   $("ov").innerHTML=VALID().map(m=>{
     const p=num(m.price)?fx(m.price,m):"–";
-    return '<button class="mc'+(m0&&m.key===m0.key?' sel':'')+'" data-k="'+m.key+'"><div class="n">'+m.name+(m.stale?' · alt':'')+'</div><div class="p">'+p+'</div><span class="badge '+m.trend+'">'+(TR[m.trend]||"–")+'</span></button>';
+    return '<button class="mc'+(m0&&m.key===m0.key?' sel':'')+'" data-k="'+m.key+'"><div class="n">'+m.name+(m.stale?' · alt':'')+'</div><div class="p">'+p+'</div><span class="badge '+m.trend+'">'+(TR[m.trend]||"–")+'</span>'+attBadge(m)+'</button>';
   }).join("");
 }
 
@@ -638,10 +646,54 @@ $("list").addEventListener("click",e=>{
   $("zdet").scrollIntoView({behavior:"smooth",block:"start"});
 });
 
+// Aufmerksamkeit: Einstiege (Bestätigung in den letzten 60 Min) und Zonen im Blick (Antest vor max. 3 Std., noch keine Bestätigung)
+function attn(m){
+  const now=Date.now()/1000;
+  const out={e:[],w:[]};
+  ["M5","H1"].forEach(tf=>{
+    const fr=m.frames[tf];if(!fr)return;
+    fr.blocks.forEach(b=>{
+      if(b.conf_t&&now-b.conf_t<=3600)out.e.push({tf,b,t:b.conf_t});
+      else if(!b.conf_t&&b.touch_t&&b.status==="angetestet"&&now-b.touch_t<=10800)out.w.push({tf,b,t:b.touch_t});
+    });
+  });
+  out.e.sort((p,q)=>q.t-p.t);
+  return out;
+}
+function attBadge(m){
+  const a=attn(m);
+  let h="";
+  if(a.e.length)h+='<span class="att e">● '+a.e.length+' Einstieg</span>';
+  if(a.w.length)h+='<span class="att w">◎ '+a.w.length+' im Blick</span>';
+  return h;
+}
+function attBar(){
+  const el=$("att");
+  const now=Date.now()/1000;
+  let items="",watch=[];
+  VALID().forEach(m=>{
+    const a=attn(m);
+    a.e.forEach(x=>{
+      const min=Math.max(0,Math.round((now-x.t)/60));
+      items+='<button class="att-it" data-k="'+m.key+'" data-tf="'+x.tf+'" data-zk="'+x.b.kind+"-"+x.b.t+'"><b>'+m.name+' '+x.tf+'</b> · Einstieg vor '+min+' Min. · '+(x.b.kind==="long"?"▲ Long":"▼ Short")+' '+fx(x.b.lo,m)+' – '+fx(x.b.hi,m)+'</button>';
+    });
+    if(a.w.length)watch.push(m.name+" ("+a.w.length+")");
+  });
+  if(!items&&!watch.length){el.innerHTML="";return;}
+  el.innerHTML=items+(watch.length?'<div class="att-note">Im Blick: '+watch.join(", ")+'</div>':"");
+}
+$("att").addEventListener("click",e=>{
+  const t=e.target.closest("[data-zk]");if(!t)return;
+  cur=t.dataset.k;frame=t.dataset.tf;
+  SEL={k:t.dataset.zk,tf:t.dataset.tf};
+  render();
+  $("chart").scrollIntoView({behavior:"smooth",block:"start"});
+});
+
 function render(){
   if(!DATA)return;
   const err=[];
-  [statsView,overview,info,summary,list,draw,zoneDetail].forEach(fn=>{
+  [statsView,overview,attBar,info,summary,list,draw,zoneDetail].forEach(fn=>{
     try{fn();}catch(e){err.push(fn.name+": "+e.message);console.error(e);}
   });
   let u="Stand: "+new Date(DATA.updated).toLocaleString("de-DE");
