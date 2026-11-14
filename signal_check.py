@@ -196,6 +196,8 @@ def find_blocks(df):
         status = "frisch"
         touch_j = None
         inv_t = None   # Zeit der Kerze, die die Zone ungültig gemacht hat (Ende der Zone im Chart)
+        visits = []    # jeder neue Kontakt mit der Zone (nach Verlassen): Zeit und ob der Schluss in der Zone lag
+        prev_touch = False
         for j in range(i + 1, len(df)):
             c = df.iloc[j]
             if kind == "long":
@@ -203,19 +205,20 @@ def find_blocks(df):
                     status = "ungueltig"
                     inv_t = int(c.time.timestamp())
                     break
-                if c.low <= hi:
-                    status = "angetestet"
-                    if touch_j is None:
-                        touch_j = j
+                touch = c.low <= hi
             else:
                 if c.close > hi:
                     status = "ungueltig"
                     inv_t = int(c.time.timestamp())
                     break
-                if c.high >= lo:
-                    status = "angetestet"
-                    if touch_j is None:
-                        touch_j = j
+                touch = c.high >= lo
+            if touch:
+                status = "angetestet"
+                if touch_j is None:
+                    touch_j = j
+                if not prev_touch:
+                    visits.append({"t": int(c.time.timestamp()), "in": bool(lo <= c.close <= hi)})
+            prev_touch = touch
         known = i + 1 < len(df)          # Folgekerze schon geschlossen?
         fvg = False
         if known:
@@ -247,6 +250,7 @@ def find_blocks(df):
             "touch_t": int(df.iloc[touch_j].time.timestamp()) if touch_j is not None else None,
             "fvg": fvg, "fvg_known": known, "adj": adj,
             "fvg_lo": fl, "fvg_hi": fh, "fvg_t": ft, "fvg_filled": filled, "inv_t": inv_t,
+            "visits": visits, "n_visits": len(visits),
         })
     return result
 
@@ -521,6 +525,32 @@ def merge_log(prev, markets, now):
     return list(log.values()), archive, since
 
 
+def zone_out(b, df, times, levels, unit2, tf, trend, dec):
+    """Zone für die App: Felder, Checkliste und Verlauf (Berührungen, Bestätigung, Ungültig)."""
+    z = {
+        "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
+        "t": b["t"], "status": b["status"], "touch_t": b["touch_t"], "inv_t": b["inv_t"],
+        "fvg": "ja" if b["fvg"] else "offen",
+        "with": trend == "neutral" or b["kind"] == trend,
+        "visits": [{"t": v["t"], "in": v["in"]} for v in b["visits"][:10]],
+        "n_visits": b["n_visits"],
+    }
+    # Checkliste fuer die App: dieselben Regeln wie Telegram und Testtrades
+    z["sweep"] = sweep_info(df, b, levels, unit2)
+    if b["touch_t"] is not None:
+        jc = entry_check(df, times, b, tf)
+        je = early_check(df, times, b, tf)
+        jm = ema_entry(df, times, b, tf)
+        z["conf_t"] = times[jc] if jc is not None else None
+        z["early_t"] = times[je] if je is not None else None
+        z["ema_t"] = times[jm] if jm is not None else None
+    if b["fvg"] and not b["fvg_filled"]:
+        z["f_lo"] = round(b["fvg_lo"], dec)
+        z["f_hi"] = round(b["fvg_hi"], dec)
+        z["f_t"] = b["fvg_t"]
+    return z
+
+
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
     order = ([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
@@ -540,6 +570,15 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
     if len(h1c) < 60 or len(m5c) < 60:
         raise RuntimeError("zu wenige Kerzen")
     trend = get_trend(h1c)
+    # Trend auf 4H und 1D nur zur Anzeige (die Einstiegsregel nutzt weiter den H1-Trend)
+    trends = {"H1": trend}
+    for tfn, res in (("H4", "HOUR_4"), ("D1", "DAY")):
+        try:
+            cc = get_candles(h, epic, res)
+            trends[tfn] = get_trend(cc.iloc[:-1].reset_index(drop=True))
+        except Exception as e:
+            print(name, tfn, "Trend-Fehler:", e)
+            trends[tfn] = None
     last = float(m5c.close.iloc[-1])
     levels = calc_levels(h1_full, last, step, dec)
     scale = last / REF_PRICE
@@ -692,30 +731,9 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                if b["t"] >= first_t and b["status"] != "ungueltig"
                and (b["adj"] or not ADJACENT)
                and (b["fvg"] or not b["fvg_known"])]
-        zones = []
         times = [int(x.timestamp()) for x in df.time]
         unit2 = "letzten 4 Std." if tf == "M5" else "letzten 2 Tage"
-        for b in vis:
-            z = {
-                "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
-                "t": b["t"], "status": b["status"], "touch_t": b["touch_t"],
-                "fvg": "ja" if b["fvg"] else "offen",
-                "with": trend == "neutral" or b["kind"] == trend,
-            }
-            # Checkliste fuer die App: dieselben Regeln wie Telegram und Testtrades
-            z["sweep"] = sweep_info(df, b, levels, unit2)
-            if b["touch_t"] is not None:
-                jc = entry_check(df, times, b, tf)
-                je = early_check(df, times, b, tf)
-                jm = ema_entry(df, times, b, tf)
-                z["conf_t"] = times[jc] if jc is not None else None
-                z["early_t"] = times[je] if je is not None else None
-                z["ema_t"] = times[jm] if jm is not None else None
-            if b["fvg"] and not b["fvg_filled"]:
-                z["f_lo"] = round(b["fvg_lo"], dec)
-                z["f_hi"] = round(b["fvg_hi"], dec)
-                z["f_t"] = b["fvg_t"]
-            zones.append(z)
+        zones = [zone_out(b, df, times, levels, unit2, tf, trend, dec) for b in vis]
         # Chart: mindestens die letzten SHOW Kerzen, sonst ab Tagesbeginn (je nachdem was weiter zurückreicht)
         src = full[full.time >= pd.Timestamp(min(day_start, first_t), unit="s", tz="UTC")]
         candles = [{
@@ -724,16 +742,11 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
             "l": round(float(r.low), dec), "c": round(float(r.close), dec),
         } for r in src.itertuples()]
         # alle gültigen Zonen seit Tagesbeginn (gleiche Filter wie oben), auch ungültige gedämpft, für die Tagesansicht
-        day_zones = [{
-            "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
-            "t": b["t"], "status": b["status"], "touch_t": b["touch_t"],
-            "inv_t": b["inv_t"],
-            "with": trend == "neutral" or b["kind"] == trend,
-        } for b in blocks[tf]
-          if b["t"] >= day_start and (b["adj"] or not ADJACENT) and (b["fvg"] or not b["fvg_known"])]
+        day_zones = [zone_out(b, df, times, levels, unit2, tf, trend, dec) for b in blocks[tf]
+                     if b["t"] >= day_start and (b["adj"] or not ADJACENT) and (b["fvg"] or not b["fvg_known"])]
         frames[tf] = {"candles": candles, "blocks": zones, "day": day_zones, "day_start": day_start}
     return {
-        "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend,
+        "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend, "trends": trends,
         "price": round(last, dec), "levels": levels, "keyl": keyl, "frames": frames,
         "stats": stats, "trades": trades, "ema_trades": ema_trades,
     }
