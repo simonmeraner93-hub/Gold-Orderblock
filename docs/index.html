@@ -76,6 +76,12 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 .stt tr.tot td{font-weight:600;border-bottom:0}
 .stt .mut{font-size:11px}
 [hidden]{display:none!important}
+.tiles{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.zdh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.zdr{margin-top:6px;color:#9aa4b8}
+.sec2{margin-top:12px;font-weight:600;font-size:13px;color:#9aa4b8}
+.tl{margin-top:6px;display:grid;gap:6px;font-size:13px}
+.tl .tt{display:inline-block;min-width:92px;color:#7c879c}
 </style>
 </head>
 <body>
@@ -100,6 +106,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
   <div class="mk" id="ov"></div>
 
   <div class="card" id="chart">
+    <div id="trl" class="note"></div>
     <div class="row">
       <button class="btn on" data-f="M5">M5</button>
       <button class="btn" data-f="H1">H1</button>
@@ -117,6 +124,8 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <label class="tog"><input type="checkbox" id="ema13" checked> EMA 13 (violett) im Chart</label>
   </div>
 
+  <div class="card" id="zdet" hidden></div>
+
   <div class="sec">Testtrades 1:1</div>
   <div class="card"><div class="sum" id="sum"></div></div>
 
@@ -127,6 +136,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
 
 <script>
 let DATA=null,frame="M5",cur="gold",NC={M5:60,H1:60};
+let SEL=null,HITS=[];   // SEL = gewählte Zone ({k, tf}), HITS = Klickflächen der gezeichneten Zonen
 let POS={M5:null,H1:null}; // POS = Zeit der linken Kerze im Ausschnitt (null = ganz rechts, neueste Kerze)
 let labelsDrawn=[];
 const STEPS=[30,45,60,90,150];
@@ -233,8 +243,31 @@ function overview(){
   }).join("");
 }
 
+// Trend-Kacheln (1D, 4H, 1H) und ein Satz wie "Long: mit 1H, gegen 1D, 4H neutral"
+function trendLine(m){
+  const T=m.trends||{H1:m.trend};
+  const ti={D1:"1D",H4:"4H",H1:"1H"};
+  const lab=t=>t==="long"?"▲ Long":t==="short"?"▼ Short":"◆ Neutral";
+  const cls=t=>t==="long"||t==="short"?t:"neutral";
+  const tiles=["D1","H4","H1"].filter(k=>k in T).map(k=>'<span class="badge '+cls(T[k])+'">'+ti[k]+" "+(T[k]?lab(T[k]):"–")+'</span>').join(" ");
+  let s="H1 neutral: keine Richtung bevorzugt";
+  const side=m.trend;
+  if(side==="long"||side==="short"){
+    const mit=[],gegen=[],neu=[];
+    ["D1","H4","H1"].forEach(k=>{const t=T[k];if(!t)return;if(t===side)mit.push(ti[k]);else if(t==="neutral")neu.push(ti[k]);else gegen.push(ti[k]);});
+    const j=a=>a.length>1?a.slice(0,-1).join(", ")+" und "+a[a.length-1]:a[0];
+    const parts=[];
+    if(mit.length)parts.push("mit "+j(mit));
+    if(gegen.length)parts.push("gegen "+j(gegen));
+    if(neu.length)parts.push(j(neu)+" neutral");
+    s=(side==="long"?"Long":"Short")+": "+parts.join(", ");
+  }
+  return '<div class="tiles">'+tiles+'</div><div>'+s+'</div>';
+}
+
 function info(){
   const m=M();if(!m)return;
+  $("trl").innerHTML=trendLine(m);
   const last=lastPrice(m);
   const r=[];
   ["H1","M5"].forEach(f=>{
@@ -330,6 +363,7 @@ function zoneBox(b,cs,cw,W,padR,y,cl,prefix,dash){
   const f2=(b.with?1:0.45)*(b.status==="ungueltig"?0.5:1);
   ctx.fillStyle="rgba("+col+","+((b.status==="angetestet"?0.07:0.12)*f2)+")";
   ctx.fillRect(x0,y1,x1-x0,h);
+  HITS.push({x0,x1,y1,y2:y1+h,b,tf:prefix?"H1":frame});
   ctx.strokeStyle="rgba("+col+","+(0.45*f2)+")";
   ctx.lineWidth=1;
   ctx.setLineDash(dash?[4,3]:[]);
@@ -367,6 +401,7 @@ function draw(){
   cv.width=W*d;cv.height=H*d;
   ctx.setTransform(d,0,0,d,0,0);
   ctx.clearRect(0,0,W,H);
+  HITS=[];
   const m=M();if(!m)return;
   const all=m.frames[frame].candles;
   const [s0,s1]=winRange(all);
@@ -551,16 +586,62 @@ function list(){
     }else{
       pt='<div class="pt none">'+(txt[t.s]||"")+'</div>';
     }
-    return '<div class="zi '+b.kind+(b.with?'':' ag')+'"><div class="h"><span><b>'+(L?'▲ Long':'▼ Short')+'</b> <span class="r">'+fx(b.lo,m)+' – '+fx(b.hi,m)+'</span></span><span class="st '+(b.status==="angetestet"?"an":"")+'">'+(ST[b.status]||"")+'</span></div>'+
+    return '<div class="zi '+b.kind+(b.with?'':' ag')+'" data-zk="'+b.kind+'-'+b.t+'"><div class="h"><span><b>'+(L?'▲ Long':'▼ Short')+'</b> <span class="r">'+fx(b.lo,m)+' – '+fx(b.hi,m)+'</span></span><span class="st '+(b.status==="angetestet"?"an":"")+'">'+(ST[b.status]||"")+'</span></div>'+
       '<div class="meta">'+tm(b.t)+'</div>'+
       '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span></div>'+checklist(b,m)+pt+'</div>';
   }).join("")||'<p class="mut">Keine Zonen in diesem Fenster</p>';
 }
 
+// Zonen-Detail: Verlauf (Entstehung, Berührungen, Bestätigung, Ungültig), Status und Checkliste
+function zoneDetail(){
+  const d=$("zdet");const m=M();
+  let b=null;
+  if(SEL&&m&&m.frames[SEL.tf]){
+    const fr=m.frames[SEL.tf];
+    b=fr.blocks.concat(fr.day||[]).find(x=>x.kind+"-"+x.t===SEL.k)||null;
+  }
+  if(!b){d.hidden=true;d.innerHTML="";return;}
+  const L=b.kind==="long";
+  const ev=[{t:b.t,s:"Zone entstanden"}];
+  (b.visits||[]).forEach((v,i)=>ev.push({t:v.t,s:"Berührung "+(i+1)+": "+(v.in?"Schluss innerhalb der Zone":"Docht in der Zone, Schluss außerhalb")}));
+  if(b.conf_t)ev.push({t:b.conf_t,s:"Bestätigungskerze (Einstieg-Signal)"});
+  if(b.early_t)ev.push({t:b.early_t,s:"Früh-Einstieg"});
+  if(b.ema_t)ev.push({t:b.ema_t,s:"EMA-13-Test erfüllt (nur Statistik)"});
+  if(b.inv_t)ev.push({t:b.inv_t,s:L?"Ungültig: Schluss unter der Zone":"Ungültig: Schluss über der Zone"});
+  ev.sort((p,q)=>p.t-q.t);
+  const n=b.n_visits||0;
+  const st=b.inv_t?"ungültig":(n?n+"× berührt":"unberührt");
+  d.hidden=false;
+  d.innerHTML='<div class="zdh"><b>'+(L?"▲ Long":"▼ Short")+'-Orderblock · '+SEL.tf+'</b><button class="btn z" id="zdx">×</button></div>'+
+    '<div class="zdr">'+fx(b.lo,m)+' – '+fx(b.hi,m)+' · '+st+'</div>'+
+    '<div class="sec2">Verlauf</div><div class="tl">'+ev.map(e=>'<div><span class="tt">'+tm(e.t)+'</span>'+e.s+'</div>').join("")+'</div>'+
+    '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span><span>'+(b.sweep?"Sweep ✓ "+b.sweep:"kein Sweep")+'</span></div>'+
+    checklist(b,m);
+  $("zdx").addEventListener("click",()=>{SEL=null;zoneDetail();});
+}
+
+// Klick auf eine Zone im Chart oder auf einen Eintrag in der Zonenliste
+cv.addEventListener("click",e=>{
+  const r=cv.getBoundingClientRect();
+  const x=e.clientX-r.left,y=e.clientY-r.top;
+  const hit=HITS.filter(h=>x>=h.x0&&x<=h.x1&&y>=h.y1&&y<=h.y2).pop();
+  if(!hit)return;
+  SEL={k:hit.b.kind+"-"+hit.b.t,tf:hit.tf};
+  zoneDetail();
+  $("zdet").scrollIntoView({behavior:"smooth",block:"nearest"});
+});
+$("list").addEventListener("click",e=>{
+  const z=e.target.closest(".zi");
+  if(!z||!z.dataset.zk)return;
+  SEL={k:z.dataset.zk,tf:frame};
+  zoneDetail();
+  $("zdet").scrollIntoView({behavior:"smooth",block:"start"});
+});
+
 function render(){
   if(!DATA)return;
   const err=[];
-  [statsView,overview,info,summary,list,draw].forEach(fn=>{
+  [statsView,overview,info,summary,list,draw,zoneDetail].forEach(fn=>{
     try{fn();}catch(e){err.push(fn.name+": "+e.message);console.error(e);}
   });
   let u="Stand: "+new Date(DATA.updated).toLocaleString("de-DE");
