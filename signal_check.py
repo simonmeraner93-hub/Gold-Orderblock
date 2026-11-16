@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import requests
+import numpy as np
 import pandas as pd
 
 BASE = "https://demo-api-capital.backend-capital.com/api/v1"
@@ -27,6 +28,9 @@ SHOW = 150
 WINDOW_MIN = 30
 LOG_KEEP_DAYS = 14   # so lange bleiben einzelne Testtrades in data.json, danach nur noch als Zaehler im Archiv
 STATE_FILE = "sent.json"
+ENTRY_ALERT_TF = {"H1"}   # Einstieg-Meldungen nur auf H1. M5-Einstiege waren im Backtest negativ (16.11.)
+LTF_RR = 1.5              # Ziel des LTF-Statistiktests (bestes Ergebnis im Backtest)
+LTF_BARS = 48 * 12        # M5-Kerzen, in denen die LTF-Bestaetigung nach dem H1-Impuls kommen darf (48 Std.)
 SESSIONS = [("Asien", 0, 7), ("London", 7, 13), ("New York", 13, 21)]
 
 # key, Name, moegliche Epics, Nachkommastellen, Abstand der runden Marken
@@ -423,6 +427,99 @@ def ema_entry(df, times, b, tf):
     return None
 
 
+def trend_series(h1):
+    """Trend je H1-Kerze, gleiche Regel wie get_trend (EMA20/EMA50 und Schlusskurs). 1 long, -1 short, 0 neutral."""
+    c = h1["close"]
+    e20 = c.ewm(span=20, adjust=False).mean()
+    e50 = c.ewm(span=50, adjust=False).mean()
+    t = np.zeros(len(h1), dtype=int)
+    t[((e20 > e50) & (c > e50)).values] = 1
+    t[((e20 < e50) & (c < e50)).values] = -1
+    return t
+
+
+def ltf_confirm(m5, start, zlo, zhi, long_):
+    """Antest und Bestaetigung auf M5-Kerzen, genau wie backtest_entry.py. Gibt den Index oder None."""
+    o, hi, lo, c = m5["open"].values, m5["high"].values, m5["low"].values, m5["close"].values
+    body = np.abs(c - o)
+    n = len(c)
+    armed = None
+    for j in range(max(start, 1), min(start + LTF_BARS + 1, n)):
+        if (long_ and c[j] < zlo) or (not long_ and c[j] > zhi):
+            return None                                   # Zone durchbrochen
+        hit = lo[j] <= zhi if long_ else hi[j] >= zlo
+        red = c[j] < o[j] if long_ else c[j] > o[j]
+        if hit and red:
+            armed = j                                     # jeder Antest mit Gegenkerze zaehlt
+            continue
+        if armed is None or j - armed > CONF_WAIT["M5"]:
+            continue
+        if body[j] < STRONG * body[max(0, j - 20):j].mean():
+            continue                                      # Bestaetigungskerze muss gross sein
+        if long_ and c[j] > o[j] and c[j] > hi[j - 1]:
+            return j
+        if not long_ and c[j] < o[j] and c[j] < lo[j - 1]:
+            return j
+    return None
+
+
+def ltf_trades(h1, m5, m5_full, blocks_h1):
+    """LTF-Statistiktest (nur Statistik, kein Alarm): H1-Zone, angrenzend, mit FVG, im Trend.
+    Antest und Bestaetigung auf M5, Stop an der Zonenkante, Ziel LTF_RR. Regeln wie backtest_entry.py."""
+    trades = []
+    if len(h1) < 61 or len(m5) < 2:
+        return trades
+    tr = trend_series(h1)
+    h1_t = [int(x.timestamp()) for x in h1.time]
+    m5_t = [int(x.timestamp()) for x in m5.time]
+    for b in blocks_h1:
+        k, i = b["k"], b["i"]
+        if k != i - 1 or not b["fvg"] or i + 1 >= len(h1) or i + 1 < 60:
+            continue
+        long_ = b["kind"] == "long"
+        if tr[i + 1] not in (0, 1 if long_ else -1):
+            continue
+        zlo, zhi = float(h1["low"].iloc[k]), float(h1["high"].iloc[k])
+        if not zhi - zlo > 0:
+            continue
+        s = next((q for q, t in enumerate(m5_t) if t >= h1_t[i] + 3600), None)
+        if s is None:
+            continue
+        j = ltf_confirm(m5, s, zlo, zhi, long_)
+        if j is None:
+            continue
+        price = float(m5["close"].iloc[j])
+        stop = zlo if long_ else zhi
+        risk = abs(price - stop)
+        if not risk > 0:
+            continue
+        tgt = price + LTF_RR * risk if long_ else price - LTF_RR * risk
+        ec = m5.iloc[j]
+        res = "offen"
+        if (ec["low"] <= stop) if long_ else (ec["high"] >= stop):
+            res = "stop"
+        else:
+            for q in range(j + 1, len(m5_full)):
+                c_ = m5_full.iloc[q]
+                if (c_["low"] <= stop) if long_ else (c_["high"] >= stop):
+                    res = "stop"
+                    break
+                if (c_["high"] >= tgt) if long_ else (c_["low"] <= tgt):
+                    res = "ziel"
+                    break
+        if res == "ziel":
+            r = LTF_RR
+        elif res == "stop":
+            r = -1.0
+        else:
+            last = float(m5_full["close"].iloc[-1])
+            r = ((last - price) if long_ else (price - last)) / risk
+        trades.append({"id": f"H1-{b['kind']}-{b['t']}-ltf", "tf": "H1", "kind": b["kind"],
+                       "t": m5_t[j], "res": res, "r": round(r, 2)})
+    trades.sort(key=lambda x: x["t"], reverse=True)
+    return trades
+
+
 def paper_stats(dfs, blocks_all, entry_fn=entry_check, tag=""):
     """Testtrades 1:1 ueber alle Zonen der geladenen Kerzen - auch ueber Zonen, die danach
     durchbrochen wurden (sonst wuerden gerade die Stops fehlen). Regeln wie beim Einstiegsalarm.
@@ -659,6 +756,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
 
         # ---- Einstieg-Meldungen (Bestaetigungskerze nach dem Antest, nur Signal, keine Order) ----
         for tf, (df, full_tf, mins) in dfs.items():
+            if tf not in ENTRY_ALERT_TF:
+                continue   # M5-Einstiege nur noch als Statistik, keine Meldung
             times = [int(x.timestamp()) for x in df.time]
             for b in blocks[tf]:
                 if b["status"] != "angetestet" or b["touch_t"] is None:
@@ -689,6 +788,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
 
         # ---- Frueh-Meldungen (gruene Kerze in den Block, dann gleich grosse rote Kerze; nur Signal) ----
         for tf, (df, full_tf, mins) in dfs.items():
+            if tf not in ENTRY_ALERT_TF:
+                continue   # M5-Einstiege nur noch als Statistik, keine Meldung
             times = [int(x.timestamp()) for x in df.time]
             for b in blocks[tf]:
                 if b["status"] != "angetestet" or b["touch_t"] is None:
@@ -755,10 +856,17 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         day_zones = [zone_out(b, df, times, levels, unit2, tf, trend, dec) for b in blocks[tf]
                      if b["t"] >= day_start and (b["adj"] or not ADJACENT) and (b["fvg"] or not b["fvg_known"])]
         frames[tf] = {"candles": candles, "blocks": zones, "day": day_zones, "day_start": day_start}
+    # LTF-Statistiktest: H1-Zone, Bestaetigung auf M5 (nur Statistik, keine Meldung)
+    try:
+        ltf_tr = ltf_trades(h1c, m5c, m5_full, blocks["H1"])
+    except Exception as e:
+        print(name, "LTF-Test-Fehler:", e)
+        ltf_tr = []
+
     return {
         "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend, "trends": trends,
         "price": round(last, dec), "levels": levels, "keyl": keyl, "frames": frames,
-        "stats": stats, "trades": trades, "ema_trades": ema_trades,
+        "stats": stats, "trades": trades, "ema_trades": ema_trades, "ltf_trades": ltf_tr,
     }
 
 
@@ -807,10 +915,24 @@ def main():
         m["ema_stats"] = e.get("stats", {})
         m["ema_trades"] = e.get("trades", [])
 
+    # LTF-Test: eigene Speicherung, nur Statistik
+    ltf_prev = {"log": prev.get("ltf_log", []), "archive": prev.get("ltf_archive", {}),
+                "log_since": prev.get("ltf_log_since")}
+    ltf_in = [{"key": m["key"], "stale": m.get("stale", False), "trades": m.get("ltf_trades", [])} for m in out]
+    try:
+        llog, larchive, lsince = merge_log(ltf_prev, ltf_in, now)
+    except Exception as e:
+        print("LTF-Log-Fehler:", e)
+        llog, larchive, lsince = ltf_prev["log"], ltf_prev["archive"], ltf_prev["log_since"]
+    for m, e in zip(out, ltf_in):
+        m["ltf_stats"] = e.get("stats", {})
+        m["ltf_trades"] = e.get("trades", [])
+
     with open("docs/data.json", "w") as f:
         json.dump({"updated": now.isoformat(), "markets": out, "log": log,
                    "archive": archive, "log_since": since,
-                   "ema_log": elog, "ema_archive": earchive, "ema_log_since": esince},
+                   "ema_log": elog, "ema_archive": earchive, "ema_log_since": esince,
+                   "ltf_log": llog, "ltf_archive": larchive, "ltf_log_since": lsince},
                   f, separators=(",", ":"))
     save_state(state)
 
