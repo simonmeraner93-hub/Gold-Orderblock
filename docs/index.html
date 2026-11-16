@@ -342,13 +342,20 @@ function statTable(title,key,ms){
   return '<div class="st-h">'+title+'</div><table class="stt"><tr><th>Markt</th><th>M5</th><th>H1</th></tr>'+rows+
     '<tr class="tot"><td>Gesamt</td><td>'+statCell(statTotal(ms,key,"M5"))+'</td><td>'+statCell(statTotal(ms,key,"H1"))+'</td></tr></table>';
 }
+// LTF-Test (nur Statistik): nur H1-Zonen, Bestaetigung auf M5, Ziel 1,5R
+function ltfTable(ms){
+  const rows=ms.map(m=>'<tr><td>'+m.name+(m.stale?' · alt':'')+'</td><td>'+statCell(m.ltf_stats&&m.ltf_stats.H1)+'</td></tr>').join("");
+  return '<div class="st-h">LTF-Test: H1-Zone, Bestätigung auf M5 (nur Statistik)</div><table class="stt"><tr><th>Markt</th><th>H1-Zone</th></tr>'+rows+
+    '<tr class="tot"><td>Gesamt</td><td>'+statCell(statTotal(ms,"ltf_stats","H1"))+'</td></tr></table>';
+}
 function statsView(){
   const ms=(DATA&&DATA.markets)||[];
-  const has=ms.some(m=>m.stats||m.ema_stats);
+  const has=ms.some(m=>m.stats||m.ema_stats||m.ltf_stats);
   if(!has){$("ovst").innerHTML='<p class="mut">noch keine Daten</p>';return;}
   $("ovst").innerHTML=statTable("Hauptregel (Bestätigungskerze)","stats",ms)+
     '<div style="height:14px"></div>'+
     statTable("EMA-13-Variante (nur Test, kein Alarm)","ema_stats",ms)+
+    '<div style="height:14px"></div>'+ltfTable(ms)+
     '<p class="note">Bot-Speicher der letzten 14 Tage. Gewinnquote = Ziele ÷ (Ziele + Stops), offene Trades zählen nicht mit. R = Summe in Risikoeinheiten, ohne Spread.</p>';
 }
 
