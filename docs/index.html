@@ -619,6 +619,16 @@ function list(){
 }
 
 // Zonen-Detail: Verlauf (Entstehung, Berührungen, Bestätigung, Ungültig), Status und Checkliste
+// Abstand des Einstiegskurses (Schluss der Bestätigungskerze) zum Zonenrand, in Zonenhöhen (0 = am Rand oder in der Zone)
+function entDist(m,tf,b){
+  if(!b||!b.conf_t||!m||!m.frames[tf])return null;
+  const c=(m.frames[tf].candles||[]).find(x=>x.t===b.conf_t);
+  const h=b.hi-b.lo;
+  if(!c||!(h>0))return null;
+  return Math.max(0,b.kind==="long"?c.c-b.hi:b.lo-c.c)/h;
+}
+function fmtX(v){return v.toFixed(1).replace(".",",");}
+
 function zoneDetail(){
   const d=$("zdet");const m=M();
   let b=null;
@@ -630,7 +640,7 @@ function zoneDetail(){
   const L=b.kind==="long";
   const ev=[{t:b.t,s:"Zone entstanden"}];
   (b.visits||[]).forEach((v,i)=>ev.push({t:v.t,s:"Berührung "+(i+1)+": "+(v.in?"Schluss innerhalb der Zone":"Docht in der Zone, Schluss außerhalb")}));
-  if(b.conf_t)ev.push({t:b.conf_t,s:"Bestätigungskerze (Einstieg-Signal)"});
+  if(b.conf_t){const dd=entDist(m,SEL.tf,b);ev.push({t:b.conf_t,s:"Bestätigungskerze (Einstieg-Signal)"+(dd==null?"":" · Abstand "+fmtX(dd)+"× Zone")});}
   if(b.early_t)ev.push({t:b.early_t,s:"Früh-Einstieg"});
   if(b.ema_t)ev.push({t:b.ema_t,s:"EMA-13-Test erfüllt (nur Statistik)"});
   if(b.inv_t)ev.push({t:b.inv_t,s:L?"Ungültig: Schluss unter der Zone":"Ungültig: Schluss über der Zone"});
@@ -693,7 +703,8 @@ function attBar(){
     const a=attn(m);
     a.e.forEach(x=>{
       const min=Math.max(0,Math.round((now-x.t)/60));
-      items+='<button class="att-it" data-k="'+m.key+'" data-tf="'+x.tf+'" data-zk="'+x.b.kind+"-"+x.b.t+'"><b>'+m.name+' '+x.tf+'</b> · Einstieg vor '+min+' Min. · '+(x.b.kind==="long"?"▲ Long":"▼ Short")+' '+fx(x.b.lo,m)+' – '+fx(x.b.hi,m)+'</button>';
+      const dd=entDist(m,x.tf,x.b);
+      items+='<button class="att-it" data-k="'+m.key+'" data-tf="'+x.tf+'" data-zk="'+x.b.kind+"-"+x.b.t+'"><b>'+m.name+' '+x.tf+'</b> · Einstieg vor '+min+' Min. · '+(x.b.kind==="long"?"▲ Long":"▼ Short")+' '+fx(x.b.lo,m)+' – '+fx(x.b.hi,m)+(dd==null?"":" · Abstand "+fmtX(dd)+"× Zone")+'</button>';
     });
     if(a.w.length)watch.push(m.name+" ("+a.w.length+")");
   });
