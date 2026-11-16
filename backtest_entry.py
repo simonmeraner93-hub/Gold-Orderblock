@@ -92,21 +92,30 @@ def outcome(d, j, zlo, zhi, kind, spread, tf):
     return {"price": price, "t": int(d["t"][j]), "r": out}
 
 
+def zdist(price, zlo, zhi, kind):
+    """Abstand des Einstiegs zum Zonenrand in Zonenhoehen (0 = am Rand oder in der Zone)."""
+    dist = max(0.0, price - zhi) if kind == 1 else max(0.0, zlo - price)
+    return dist / (zhi - zlo)
+
+
 def run_market(m5, h1, spread):
     tr = bs.h1_trend(h1)
     avail = h1["t"] + 3600
     start_ok = avail[min(bs.WARMUP_H1, len(avail) - 1)]
     trades = []
+    m5_t0 = int(m5["t"][0])   # LTF braucht M5-Daten: H1-Zonen werden nur ab hier gewertet, fuer alle Varianten gleich
 
     def add(variant, res, tf):
         for rr in RRS:
             trades.append({"tf": tf, "variant": variant, "entry": "bestaetigung",
-                           "rr": rr, "r": res["r"][rr], "t": res["t"]})
+                           "rr": rr, "r": res["r"][rr], "t": res["t"], "zd": res["zd"]})
 
     for tf, d in (("M5", m5), ("H1", h1)):
         step = 300 if tf == "M5" else 3600
         for b in bs.find_blocks(d):
             if not (b["adj"] and b["fvg"]):
+                continue
+            if tf == "H1" and int(d["t"][b["i"]]) < m5_t0 + 3600:
                 continue
             sig_t = int(d["t"][b["i"] + 1]) + step
             if sig_t < start_ok:
@@ -128,11 +137,10 @@ def run_market(m5, h1, spread):
             base = outcome(d, j, zlo, zhi, kind, spread, tf)
             if base is None:
                 continue
+            base["zd"] = zdist(base["price"], zlo, zhi, kind)
             add("basis", base, tf)
 
-            p = base["price"]
-            dist = max(0.0, p - zhi) if kind == 1 else max(0.0, zlo - p)
-            if dist / (zhi - zlo) <= MAX_DIST:
+            if base["zd"] <= MAX_DIST:
                 add("abstand", base, tf)
 
             hour = datetime.fromtimestamp(base["t"], ROME).hour
@@ -145,8 +153,19 @@ def run_market(m5, h1, spread):
                 if j5 is not None:
                     ltf = outcome(m5, j5, zlo, zhi, kind, spread, "M5")
                     if ltf is not None:
+                        ltf["zd"] = zdist(ltf["price"], zlo, zhi, kind)
                         add("ltf", ltf, "H1")
     return trades
+
+
+def abstand_mittel(trades):
+    """Mittlerer Abstand des Einstiegs zur Zone (in Zonenhoehen) je Zeitrahmen und Variante."""
+    acc = {}
+    for t in trades:
+        if t["rr"] != RRS[0]:
+            continue
+        acc.setdefault(t["tf"], {}).setdefault(t["variant"], []).append(t["zd"])
+    return {tf: {v: round(float(np.mean(x)), 2) for v, x in vs.items()} for tf, vs in acc.items()}
 
 
 def write(res):
@@ -178,7 +197,9 @@ def main():
     r.raise_for_status()
     h = {"CST": r.headers["CST"], "X-SECURITY-TOKEN": r.headers["X-SECURITY-TOKEN"]}
     res = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-           "varianten": NAMES, "max_abstand": MAX_DIST, "sitzung": list(SESSION), "markets": []}
+           "varianten": NAMES, "max_abstand": MAX_DIST, "sitzung": list(SESSION),
+           "hinweis": "H1-Zonen nur im Zeitraum der M5-Daten, damit alle Varianten vergleichbar sind",
+           "markets": []}
     write(res)
     pooled = []
     for name, cands in bs.MARKETS:
@@ -195,7 +216,7 @@ def main():
                 write(res)
                 continue
             m5 = None
-            for days in (180, 120, 70, 40):
+            for days in (365, 180, 120, 70, 40):
                 try:
                     m5 = bs.fetch(h, epic, "MINUTE_5", days, 3, 1000)
                     entry["m5_days"] = days
@@ -219,7 +240,8 @@ def main():
             if not spread or spread <= 0:
                 spread = 0.000144 * price
             entry.update({"epic": epic, "spread": spread,
-                          "m5_candles": len(m5["c"]), "h1_candles": len(h1["c"])})
+                          "m5_candles": len(m5["c"]), "h1_candles": len(h1["c"]),
+                          "m5_ab": datetime.fromtimestamp(int(m5["t"][0]), timezone.utc).strftime("%Y-%m-%d")})
             trades = run_market(m5, h1, spread)
             entry["stats"] = bs.summarize(trades)
             pooled.extend(trades)
@@ -229,8 +251,10 @@ def main():
             entry["error"] = str(e)
             write(res)
     res["pooled"] = bs.summarize(pooled)
+    res["abstand_mittel"] = abstand_mittel(pooled)
     write(res)
     print_summary(res["pooled"])
+    print("Mittlerer Abstand zur Zone (Zonenhoehen):", res["abstand_mittel"])
     print("fertig")
 
 
