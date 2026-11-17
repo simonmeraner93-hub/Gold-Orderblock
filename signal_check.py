@@ -161,8 +161,18 @@ def calc_levels(h1, last, step, dec):
     return levels
 
 
-def find_blocks(df):
-    """Orderblöcke: starke Impulskerze + letzte Gegenkerze davor."""
+def _fvg_size(df, i, kind):
+    """Groesse der Luecke zwischen Kerze i-1 und Kerze i+1 (0, wenn keine Luecke oder die Folgekerze fehlt)."""
+    if i + 1 >= len(df):
+        return 0.0
+    if kind == "long":
+        return max(0.0, float(df.iloc[i + 1].low - df.iloc[i - 1].high))
+    return max(0.0, float(df.iloc[i - 1].low - df.iloc[i + 1].high))
+
+
+def find_blocks(df, loose=False):
+    """Orderblöcke: starke Impulskerze + letzte Gegenkerze davor.
+    loose=True (nur M5, nur Anzeige): eine starke Zwischenkerze zwischen Block und Impuls ist erlaubt, wenn ein FVG da ist."""
     body = (df["close"] - df["open"]).abs()
     found = {}
     for i in range(SWING + 20, len(df)):
@@ -194,15 +204,23 @@ def find_blocks(df):
         hi = float(df.iloc[k].high)
         adj = k == i - 1
         # kleine Fortsetzungskerzen zwischen Block und Impuls (max. 2) gehoeren zur Zone
+        grp_loose = False
         if not adj and i - k - 1 <= GROUP_MAX:
             avg_g = float(body.iloc[max(0, i - 20):i].mean())
             same = True
+            strong_mid = False
             for j in range(k + 1, i):
                 cj = df.iloc[j]
                 dir_ok = (cj.close > cj.open) if kind == "long" else (cj.close < cj.open)
-                if not dir_ok or abs(cj.close - cj.open) >= STRONG * avg_g:
+                if not dir_ok:
                     same = False
                     break
+                if abs(cj.close - cj.open) >= STRONG * avg_g:
+                    strong_mid = True
+            if strong_mid:
+                # starke Zwischenkerze: nur im Loose-Modus (M5), dann nur mit FVG zwischen Kerze i-1 und i+1
+                same = same and loose and _fvg_size(df, i, kind) >= FVG_MIN * avg_g
+                grp_loose = bool(same)
             if same:
                 adj = True
                 lo = float(df.iloc[k:i].low.min())
@@ -259,7 +277,7 @@ def find_blocks(df):
                     filled = True
                     break
         result.append({
-            "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi,
+            "kind": kind, "k": k, "i": i, "lo": lo, "hi": hi, "loose": grp_loose,
             "t": int(df.iloc[k].time.timestamp()), "status": status,
             "touch_t": int(df.iloc[touch_j].time.timestamp()) if touch_j is not None else None,
             "fvg": fvg, "fvg_known": known, "adj": adj,
@@ -691,7 +709,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
     scale = last / REF_PRICE
 
     dfs = {"M5": (m5c, m5_full, 5), "H1": (h1c, h1_full, 60)}
-    blocks = {tf: find_blocks(dfs[tf][0]) for tf in dfs}
+    blocks = {tf: find_blocks(dfs[tf][0], loose=(tf == "M5")) for tf in dfs}
     valid_h1 = [b for b in blocks["H1"] if b["status"] != "ungueltig"]
 
     # Antest durch die noch laufende Kerze sofort erkennen (nicht erst nach Kerzenschluss)
@@ -865,7 +883,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
 
     return {
         "key": key, "name": name, "epic": epic, "dec": dec, "trend": trend, "trends": trends,
-        "price": round(last, dec), "levels": levels, "keyl": keyl, "frames": frames,
+        "price": round(float(m5_full["close"].iloc[-1]), dec), "levels": levels, "keyl": keyl, "frames": frames,
         "stats": stats, "trades": trades, "ema_trades": ema_trades, "ltf_trades": ltf_tr,
     }
 
