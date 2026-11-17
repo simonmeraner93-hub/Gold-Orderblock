@@ -454,9 +454,12 @@ function draw(){
   const step=niceStep(hi-lo,7);
   const dec=step>=1?0:Math.min(5,Math.max(0,Math.ceil(-Math.log10(step))));
   ctx.textAlign="left";
+  // Kursmarke (blau) rechts: die Gitterzahl direkt darunter weglassen, sonst verdeckt sie die Marke
+  const kursY=y(cs[cs.length-1].c);
   for(let p=Math.ceil(lo/step)*step;p<=hi;p+=step){
     ctx.strokeStyle="rgba(148,163,184,.09)";
     ctx.beginPath();ctx.moveTo(0,y(p));ctx.lineTo(W-padR,y(p));ctx.stroke();
+    if(Math.abs(y(p)-kursY)<12)continue;
     ctx.fillStyle="#7c879c";
     ctx.fillText(p.toFixed(dec),W-padR+6,y(p)+4);
   }
