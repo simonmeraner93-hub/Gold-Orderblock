@@ -170,16 +170,19 @@ def _fvg_size(df, i, kind):
     return max(0.0, float(df.iloc[i - 1].low - df.iloc[i + 1].high))
 
 
-def find_blocks(df, loose=False):
+def find_blocks(df, loose=False, strong=None, neutral_k=False, swing=None):
     """Orderblöcke: starke Impulskerze + letzte Gegenkerze davor.
-    loose=True (nur M5, nur Anzeige): eine starke Zwischenkerze zwischen Block und Impuls ist erlaubt, wenn ein FVG da ist."""
+    loose=True (nur M5, nur Anzeige): eine starke Zwischenkerze zwischen Block und Impuls ist erlaubt, wenn ein FVG da ist.
+    strong / neutral_k (nur H1-Anzeige): schwächerer Impuls, und ein Doji direkt vor dem Impuls zählt als Block."""
     body = (df["close"] - df["open"]).abs()
     found = {}
+    st = STRONG if strong is None else strong
+    sw = SWING if swing is None else swing
     for i in range(SWING + 20, len(df)):
         avg = body.iloc[i - 20:i].mean()
         c = df.iloc[i]
-        prev = df.iloc[i - SWING:i]
-        if body.iloc[i] < STRONG * avg:
+        prev = df.iloc[i - sw:i]
+        if body.iloc[i] < st * avg:
             continue
         kind = None
         if c.close > c.open and c.close > prev.high.max():
@@ -187,6 +190,9 @@ def find_blocks(df, loose=False):
         elif c.close < c.open and c.close < prev.low.min():
             kind = "short"
         if kind is None:
+            continue
+        if neutral_k and abs(df.iloc[i - 1].close - df.iloc[i - 1].open) < 0.25 * avg:
+            found.setdefault(i - 1, (kind, i))   # Doji direkt vor dem Impuls zaehlt als Block
             continue
         for k in range(i - 1, max(i - 6, 0), -1):
             o = df.iloc[k]
@@ -661,6 +667,7 @@ def zone_out(b, df, times, levels, unit2, tf, trend, dec):
         "with": trend == "neutral" or b["kind"] == trend,
         "visits": [{"t": v["t"], "in": v["in"]} for v in b["visits"][:10]],
         "n_visits": b["n_visits"],
+        "nur_anzeige": bool(b.get("nur_anzeige")),
     }
     # Checkliste fuer die App: dieselben Regeln wie Telegram und Testtrades
     z["sweep"] = sweep_info(df, b, levels, unit2)
@@ -712,6 +719,15 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
 
     dfs = {"M5": (m5c, m5_full, 5), "H1": (h1c, h1_full, 60)}
     blocks = {tf: find_blocks(dfs[tf][0], loose=(tf == "M5")) for tf in dfs}
+    # H1-Anzeige wie TraderJe (nur Chart): schwaecherer Impuls, kuerzerer Strukturbezug, Doji zaehlt als Block.
+    # Keine Meldung und keine Statistik: die bleiben bei blocks["H1"] (wie bisher).
+    strict_h1 = {(b["kind"], b["t"]) for b in blocks["H1"]}
+    show_h1 = find_blocks(dfs["H1"][0], strong=1.0, swing=5, neutral_k=True)
+    shown_keys = {(b["kind"], b["t"]) for b in show_h1}
+    h1_show = show_h1 + [b for b in blocks["H1"] if (b["kind"], b["t"]) not in shown_keys]
+    for b in h1_show:
+        b["nur_anzeige"] = (b["kind"], b["t"]) not in strict_h1
+    show_blocks = {"M5": blocks["M5"], "H1": [b for b in h1_show if b["adj"]]}
     valid_h1 = [b for b in blocks["H1"] if b["status"] != "ungueltig"]
 
     # Antest durch die noch laufende Kerze sofort erkennen (nicht erst nach Kerzenschluss)
@@ -858,10 +874,10 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
     for tf, (df, full, mins) in dfs.items():
         shown = full.iloc[-SHOW:]
         first_t = int(shown.iloc[0].time.timestamp())
-        vis = [b for b in blocks[tf]
+        vis = [b for b in show_blocks[tf]
                if b["t"] >= first_t and b["status"] != "ungueltig"
                and (b["adj"] or not ADJACENT)
-               and (b["fvg"] or not b["fvg_known"])]
+               and (b["fvg"] or not b["fvg_known"] or tf == "H1")]
         times = [int(x.timestamp()) for x in df.time]
         unit2 = "letzten 4 Std." if tf == "M5" else "letzten 2 Tage"
         zones = [zone_out(b, df, times, levels, unit2, tf, trend, dec) for b in vis]
@@ -873,8 +889,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
             "l": round(float(r.low), dec), "c": round(float(r.close), dec),
         } for r in src.itertuples()]
         # alle gültigen Zonen seit Tagesbeginn (gleiche Filter wie oben), auch ungültige gedämpft, für die Tagesansicht
-        day_zones = [zone_out(b, df, times, levels, unit2, tf, trend, dec) for b in blocks[tf]
-                     if b["t"] >= day_start and (b["adj"] or not ADJACENT) and (b["fvg"] or not b["fvg_known"])]
+        day_zones = [zone_out(b, df, times, levels, unit2, tf, trend, dec) for b in show_blocks[tf]
+                     if b["t"] >= day_start and (b["adj"] or not ADJACENT) and (b["fvg"] or not b["fvg_known"] or tf == "H1")]
         frames[tf] = {"candles": candles, "blocks": zones, "day": day_zones, "day_start": day_start}
     # LTF-Statistiktest: H1-Zone, Bestaetigung auf M5 (nur Statistik, keine Meldung)
     try:
