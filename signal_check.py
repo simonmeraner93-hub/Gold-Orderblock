@@ -223,8 +223,10 @@ def find_blocks(df, loose=False):
                 grp_loose = bool(same)
             if same:
                 adj = True
-                lo = float(df.iloc[k:i].low.min())
-                hi = float(df.iloc[k:i].high.max())
+                if not grp_loose:
+                    # normale Gruppe: Zone = ganze Gruppe. Loose (M5, starke Zwischenkerze): nur die Orderblock-Kerze, sonst wird die Box zu gross
+                    lo = float(df.iloc[k:i].low.min())
+                    hi = float(df.iloc[k:i].high.max())
         status = "frisch"
         touch_j = None
         inv_t = None   # Zeit der Kerze, die die Zone ungültig gemacht hat (Ende der Zone im Chart)
