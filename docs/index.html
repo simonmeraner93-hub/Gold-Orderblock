@@ -298,6 +298,7 @@ function info(){
   const r=[];
   ["H1","M5"].forEach(f=>{
     m.frames[f].blocks.forEach(b=>{
+      if(b.nur_anzeige)return;   // nur zur Anzeige im Chart, kein Einstieg
       if(last>=b.lo&&last<=b.hi)
         r.push(f+" "+(b.kind==="long"?"Long":"Short")+" "+fx(b.lo,m)+" – "+fx(b.hi,m)+(b.fvg==="offen"?" (FVG ?)":""));
     });
@@ -473,7 +474,10 @@ function draw(){
   // alle Zonen, die in diesem Ausschnitt schon existierten: gültige bis zum Rand, ungültige bis zu ihrer Bruchkerze
   labelsDrawn=[];
   const fr=m.frames[frame];
-  pickZones(fr.blocks.concat(fr.day||[]),cs,lo,hi,0).forEach(b=>{
+  // sehr grosse Zonen (mehr als 3x die typische Kerzengroesse im Ausschnitt) nur im Chart ausblenden; Meldungen und Statistik bleiben
+  const rgs=cs.map(c=>c.h-c.l).sort((a,b)=>a-b);
+  const maxZoneH=3*(rgs[Math.floor(rgs.length/2)]||0);
+  pickZones(fr.blocks.concat(fr.day||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0).forEach(b=>{
     zoneBox(b,cs,cw,W,padR,y,cl,null,false);
   });
 
@@ -691,6 +695,7 @@ function attn(m){
   ["M5","H1"].forEach(tf=>{
     const fr=m.frames[tf];if(!fr)return;
     fr.blocks.forEach(b=>{
+      if(b.nur_anzeige)return;   // nur zur Anzeige im Chart, keine Badges
       if(b.conf_t&&now-b.conf_t<=3600)out.e.push({tf,b,t:b.conf_t});
       else if(!b.conf_t&&b.touch_t&&b.status==="angetestet"&&now-b.touch_t<=10800)out.w.push({tf,b,t:b.touch_t});
     });
