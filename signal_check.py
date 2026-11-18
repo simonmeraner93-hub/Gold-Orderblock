@@ -238,20 +238,28 @@ def find_blocks(df, loose=False, strong=None, neutral_k=False, swing=None):
         inv_t = None   # Zeit der Kerze, die die Zone ungültig gemacht hat (Ende der Zone im Chart)
         visits = []    # jeder neue Kontakt mit der Zone (nach Verlassen): Zeit und ob der Schluss in der Zone lag
         prev_touch = False
+        # Toleranz: ungültig erst bei zwei Schlüssen hintereinander über dem Rand
+        # oder einem Schluss, der mehr als eine halbe Zonenhöhe darüber liegt.
+        consec = 0
+        zone_h = hi - lo
         for j in range(i + 1, len(df)):
             c = df.iloc[j]
             if kind == "long":
-                if c.close < lo:
-                    status = "ungueltig"
-                    inv_t = int(c.time.timestamp())
-                    break
+                beyond = c.close < lo
+                depth = lo - c.close
                 touch = c.low <= hi
             else:
-                if c.close > hi:
+                beyond = c.close > hi
+                depth = c.close - hi
+                touch = c.high >= lo
+            if beyond:
+                consec += 1
+                if consec >= 2 or depth > 0.5 * zone_h:
                     status = "ungueltig"
                     inv_t = int(c.time.timestamp())
                     break
-                touch = c.high >= lo
+            else:
+                consec = 0
             if touch:
                 status = "angetestet"
                 if touch_j is None:
