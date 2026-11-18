@@ -693,8 +693,38 @@ def zone_out(b, df, times, levels, unit2, tf, trend, dec):
     return z
 
 
+DUP_OVERLAP = 0.5   # "Neuer"-Meldung entfaellt, wenn eine aeltere gueltige Zone gleicher Richtung
+                    # mehr als diesen Anteil der neuen Zonenhoehe ueberdeckt (dieselbe Zone, andere Kerze)
+
+
+def _meldbar(b):
+    """Zone, die ueberhaupt als Alarm in Frage kommt (gleiche Filter wie bei den Meldungen)."""
+    if b["status"] == "ungueltig":
+        return False
+    if ADJACENT and not b["adj"]:
+        return False
+    if b["fvg_known"] and not b["fvg"]:
+        return False
+    return True
+
+
+def _dublette(b, zonen):
+    """True, wenn eine aeltere, noch gueltige und meldbare Zone gleicher Richtung die Zone b
+    zu mehr als DUP_OVERLAP ihrer Hoehe ueberdeckt."""
+    hoehe = b["hi"] - b["lo"]
+    if not hoehe > 0:
+        return False
+    for o in zonen:
+        if o["kind"] != b["kind"] or o["t"] >= b["t"] or not _meldbar(o):
+            continue
+        ueberlappung = min(b["hi"], o["hi"]) - max(b["lo"], o["lo"])
+        if ueberlappung > DUP_OVERLAP * hoehe:
+            return True
+    return False
+
+
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
-    order = ([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
+    order =([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
     for ep in order:
         try:
@@ -763,6 +793,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                     continue
                 close_t = df.iloc[b["i"]].time + timedelta(minutes=mins)
                 if close_t < cutoff:
+                    continue
+                if _dublette(b, blocks[tf]):
                     continue
                 skey = f"{epic}-{tf}-{b['kind']}-{b['t']}"
                 if key == "gold" and tf == "M5":
