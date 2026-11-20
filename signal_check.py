@@ -2,13 +2,14 @@
 
 Telegram bei Orderblöcken (M5 und H1), die ein Fair Value Gap haben (ist es noch nicht
 bekannt: Meldung mit Fragezeichen, ist es bekannt und nicht vorhanden: keine Meldung),
-mit UND gegen den H1-Trend (die Meldung sagt, ob mit oder gegen den Trend):
+nur in Richtung des H1-Trends (bei neutralem Trend in beide Richtungen):
  1. beim neuen Orderblock
  2. wenn der Kurs den Orderblock zum ersten Mal antestet
 Schreibt ausserdem docs/data.json fuer die App.
 """
 import os
 import json
+import bisect
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import requests
@@ -26,6 +27,7 @@ CONF_WAIT = {"M5": 12, "H1": 6}   # Kerzen nach dem ersten Antest, in denen die 
 SWING = 10
 SHOW = 150
 WINDOW_MIN = 30
+STATS_RULE = "h1-trend"   # Version der Statistikregel (nur Trendrichtung). Aendert sie sich, baut sich die Statistik neu auf
 LOG_KEEP_DAYS = 14   # so lange bleiben einzelne Testtrades in data.json, danach nur noch als Zaehler im Archiv
 STATE_FILE = "sent.json"
 ENTRY_ALERT_TF = {"H1"}   # Einstieg-Meldungen nur auf H1. M5-Einstiege waren im Backtest negativ (16.11.)
@@ -472,6 +474,21 @@ def trend_series(h1):
     return t
 
 
+def in_trend(kind, trend):
+    """Einstieg nur in Richtung des H1-Trends; bei neutralem Trend in beide Richtungen."""
+    return trend == "neutral" or kind == trend
+
+
+def trend_ok(tr, h1_open, t_close, long_):
+    """Wie in_trend, aber zum Zeitpunkt t_close (Unix-Sekunden) der Einstiegskerze. Massgeblich ist die zuletzt
+    abgeschlossene H1-Kerze, damit nichts aus der Zukunft einfliesst. tr: trend_series, h1_open: H1-Startzeiten."""
+    q = bisect.bisect_right(h1_open, t_close - 3600) - 1
+    if q < 0:
+        return False
+    v = int(tr[q])
+    return v == 0 or v == (1 if long_ else -1)
+
+
 def ltf_confirm(m5, start, zlo, zhi, long_):
     """Antest und Bestaetigung auf M5-Kerzen, genau wie backtest_entry.py. Gibt den Index oder None."""
     o, hi, lo, c = m5["open"].values, m5["high"].values, m5["low"].values, m5["close"].values
@@ -511,8 +528,6 @@ def ltf_trades(h1, m5, m5_full, blocks_h1):
         if k != i - 1 or not b["fvg"] or i + 1 >= len(h1) or i + 1 < 60:
             continue
         long_ = b["kind"] == "long"
-        if tr[i + 1] not in (0, 1 if long_ else -1):
-            continue
         zlo, zhi = float(h1["low"].iloc[k]), float(h1["high"].iloc[k])
         if not zhi - zlo > 0:
             continue
@@ -522,6 +537,8 @@ def ltf_trades(h1, m5, m5_full, blocks_h1):
         j = ltf_confirm(m5, s, zlo, zhi, long_)
         if j is None:
             continue
+        if not trend_ok(tr, h1_t, m5_t[j] + 300, long_):
+            continue   # Einstieg nur in Trendrichtung (H1-Trend zum Einstiegszeitpunkt)
         price = float(m5["close"].iloc[j])
         stop = zlo if long_ else zhi
         risk = abs(price - stop)
@@ -559,6 +576,9 @@ def paper_stats(dfs, blocks_all, entry_fn=entry_check, tag=""):
     durchbrochen wurden (sonst wuerden gerade die Stops fehlen). Regeln wie beim Einstiegsalarm.
     entry_fn bestimmt den Einstieg (Standard: Bestaetigungskerze; Variante: EMA 13)."""
     stats, trades = {}, []
+    h1df = dfs["H1"][0]
+    tr_h1 = trend_series(h1df)
+    h1_open = [int(x.timestamp()) for x in h1df.time]
     for tf, (df, full, mins) in dfs.items():
         times = [int(x.timestamp()) for x in df.time]
         z = sl = o = 0
@@ -574,6 +594,8 @@ def paper_stats(dfs, blocks_all, entry_fn=entry_check, tag=""):
             if j is None:
                 continue
             long_ = b["kind"] == "long"
+            if not trend_ok(tr_h1, h1_open, times[j] + mins * 60, long_):
+                continue   # Statistik nur in Trendrichtung
             price = float(df.iloc[j].close)
             stop = b["lo"] if long_ else b["hi"]
             risk = abs(price - stop)
@@ -794,6 +816,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                 close_t = df.iloc[b["i"]].time + timedelta(minutes=mins)
                 if close_t < cutoff:
                     continue
+                if not in_trend(b["kind"], trend):
+                    continue   # Gegen-Trend-Blöcke werden nicht gemeldet
                 if _dublette(b, blocks[tf]):
                     continue
                 skey = f"{epic}-{tf}-{b['kind']}-{b['t']}"
@@ -820,6 +844,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                     continue
                 if b["touch_t"] + mins * 60 < cutoff.timestamp():
                     continue
+                if not in_trend(b["kind"], trend):
+                    continue   # Gegen-Trend-Blöcke werden nicht gemeldet
                 skey = f"{epic}-{tf}-{b['kind']}-{b['t']}-test"
                 if skey in state:
                     continue
@@ -842,6 +868,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                     continue
                 if b["fvg_known"] and not b["fvg"]:
                     continue
+                if not in_trend(b["kind"], trend):
+                    continue   # Einstieg nur in Trendrichtung
                 j = entry_check(df, times, b, tf)
                 if j is None or times[j] + mins * 60 < cutoff.timestamp():
                     continue
@@ -874,6 +902,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                     continue
                 if b["fvg_known"] and not b["fvg"]:
                     continue
+                if not in_trend(b["kind"], trend):
+                    continue   # Frueh-Einstieg nur in Trendrichtung
                 j = early_check(df, times, b, tf)
                 if j is None or times[j] + mins * 60 < cutoff.timestamp():
                     continue
@@ -957,6 +987,9 @@ def main():
         old = {m["key"]: m for m in prev.get("markets", [])}
     except Exception:
         prev, old = {}, {}
+    if prev.get("stats_rule") != STATS_RULE:
+        # neue Statistikregel: gespeicherte Testtrades (auch Gegen-Trend) verwerfen, Statistik baut sich neu auf
+        prev = {}
     h = login()
     out = []
     for key, name, cands, dec, step in MARKETS:
@@ -1005,7 +1038,7 @@ def main():
         m["ltf_trades"] = e.get("trades", [])
 
     with open("docs/data.json", "w") as f:
-        json.dump({"updated": now.isoformat(), "markets": out, "log": log,
+        json.dump({"updated": now.isoformat(), "stats_rule": STATS_RULE, "markets": out, "log": log,
                    "archive": archive, "log_since": since,
                    "ema_log": elog, "ema_archive": earchive, "ema_log_since": esince,
                    "ltf_log": llog, "ltf_archive": larchive, "ltf_log_since": lsince},
