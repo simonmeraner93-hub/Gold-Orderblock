@@ -325,7 +325,7 @@ function summary(){
     "<br><span class='mut'>"+frame+", nur die letzten Kerzen im Chart, ohne Spread</span>";
 }
 
-// Übersicht oben: 14-Tage-Statistik aus dem Bot (persistent), Hauptregel und EMA-13-Variante
+// Übersicht oben: Statistik aus dem Bot (Langzeit-Zeitraum, sonst 14-Tage-Speicher), Hauptregel und EMA-13-Variante
 function statCell(s){
   if(!s)return'<span class="mut">–</span>';
   const closed=s.z+s.s;
@@ -349,6 +349,13 @@ function ltfTable(ms){
   return '<div class="st-h">LTF-Test: H1-Zone, Bestätigung auf M5 (nur Statistik)</div><table class="stt"><tr><th>Markt</th><th>H1-Zone</th></tr>'+rows+
     '<tr class="tot"><td>Gesamt</td><td>'+statCell(statTotal(ms,"ltf_stats","H1"))+'</td></tr></table>';
 }
+// Zeitraum der Statistik: Langzeit-Auswertung (stats_long.py) oder der 14-Tage-Speicher des Bots
+function statPeriod(){
+  const L=DATA&&DATA.stats_long;
+  if(!L||!L.days)return"Bot-Speicher der letzten 14 Tage. ";
+  let d="";try{d=new Date(L.computed).toLocaleDateString("de-DE");}catch(e){}
+  return"Zeitraum: M5 "+L.days.M5+" Tage, H1 "+L.days.H1+" Tage"+(d?" (Stand "+d+")":"")+". ";
+}
 function statsView(){
   const ms=(DATA&&DATA.markets)||[];
   const has=ms.some(m=>m.stats||m.ema_stats||m.ltf_stats);
@@ -357,7 +364,7 @@ function statsView(){
     '<div style="height:14px"></div>'+
     statTable("EMA-13-Variante (nur Test, kein Alarm)","ema_stats",ms)+
     '<div style="height:14px"></div>'+ltfTable(ms)+
-    '<p class="note">Bot-Speicher der letzten 14 Tage. Gewinnquote = Ziele ÷ (Ziele + Stops), offene Trades zählen nicht mit. R = Summe in Risikoeinheiten, ohne Spread.</p>';
+    '<p class="note">'+statPeriod()+'Gewinnquote = Ziele ÷ (Ziele + Stops), offene Trades zählen nicht mit. R = Summe in Risikoeinheiten, ohne Spread.</p>';
 }
 
 // EMA 13 über die Schlusskurse (wie der Bot), gerechnet über alle geladenen Kerzen
