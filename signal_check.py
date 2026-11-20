@@ -30,6 +30,7 @@ WINDOW_MIN = 30
 STATS_RULE = "h1-trend"   # Version der Statistikregel (nur Trendrichtung). Aendert sie sich, baut sich die Statistik neu auf
 LOG_KEEP_DAYS = 14   # so lange bleiben einzelne Testtrades in data.json, danach nur noch als Zaehler im Archiv
 STATE_FILE = "sent.json"
+LONG_FILE = "docs/stats_long.json"   # Langzeit-Statistik, erzeugt von stats_long.py (eigener taeglicher Lauf)
 ENTRY_ALERT_TF = {"H1"}   # Einstieg-Meldungen nur auf H1. M5-Einstiege waren im Backtest negativ (16.11.)
 LTF_RR = 1.5              # Ziel des LTF-Statistiktests (bestes Ergebnis im Backtest)
 LTF_BARS = 48 * 12        # M5-Kerzen, in denen die LTF-Bestaetigung nach dem H1-Impuls kommen darf (48 Std.)
@@ -79,6 +80,16 @@ def save_state(s):
     s = {k: v for k, v in s.items() if v >= cut}
     with open(STATE_FILE, "w") as f:
         json.dump(s, f)
+
+
+def load_long():
+    """Langzeit-Statistik aus docs/stats_long.json. None, wenn die Datei fehlt oder zu einer anderen Statistikregel gehoert."""
+    try:
+        with open(LONG_FILE) as f:
+            d = json.load(f)
+    except Exception:
+        return None
+    return d if d.get("stats_rule") == STATS_RULE else None
 
 
 def login():
@@ -1037,13 +1048,29 @@ def main():
         m["ltf_stats"] = e.get("stats", {})
         m["ltf_trades"] = e.get("trades", [])
 
+    # Langzeit-Statistik (stats_long.py, eigener taeglicher Lauf): ersetzt die Zaehler, wenn vorhanden und passend.
+    # Die Testtrade-Listen bleiben wie bisher aus dem 14-Tage-Speicher. Alarme haengen nicht daran.
+    long = load_long()
+    long_meta = None
+    if long:
+        lm = {x["key"]: x for x in long.get("markets", [])}
+        for m in out:
+            x = lm.get(m["key"])
+            if x:
+                m["stats"] = x["stats"]
+                m["ema_stats"] = x["ema_stats"]
+                m["ltf_stats"] = x["ltf_stats"]
+        long_meta = {"computed": long.get("computed"), "days": long.get("days")}
+
     with open("docs/data.json", "w") as f:
         json.dump({"updated": now.isoformat(), "stats_rule": STATS_RULE, "markets": out, "log": log,
                    "archive": archive, "log_since": since,
                    "ema_log": elog, "ema_archive": earchive, "ema_log_since": esince,
-                   "ltf_log": llog, "ltf_archive": larchive, "ltf_log_since": lsince},
+                   "ltf_log": llog, "ltf_archive": larchive, "ltf_log_since": lsince,
+                   "stats_long": long_meta},
                   f, separators=(",", ":"))
     save_state(state)
 
 
-main()
+if __name__ == "__main__":
+    main()
