@@ -1,0 +1,64 @@
+name: Break and Retest Backtest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: break-retest
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Maerkte dieses Teils berechnen
+        run: python break_retest.py --shard ${{ matrix.shard }} --of 3 --out parts/part-${{ matrix.shard }}/part-${{ matrix.shard }}.json
+        env:
+          CAPITAL_API_KEY: ${{ secrets.CAPITAL_API_KEY }}
+          CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
+          CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: break-retest-part-${{ matrix.shard }}
+          path: parts/
+          if-no-files-found: ignore
+
+  merge:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: break-retest-part-*
+          path: parts/
+          merge-multiple: true
+      - name: Teile zusammenfuehren
+        run: python break_retest.py --merge parts --out docs/break_retest.json
+      - name: Ergebnis speichern
+        run: |
+          git config user.name "orderblock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/break_retest.json
+          git diff --staged --quiet || git commit -m "break retest result"
+          for i in 1 2 3; do git pull --rebase && git push && break || sleep 5; done
