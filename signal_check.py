@@ -726,6 +726,16 @@ def zone_out(b, df, times, levels, unit2, tf, trend, dec):
     return z
 
 
+def anzeige_out(b, dec, trend):
+    """Nur Anzeige im Chart (wie TraderJe): Orderblock mit Kerzen zwischen Block und Impuls.
+    Kein Einstieg, keine Meldung, keine Statistik. ADJACENT (die Live-Regel) bleibt unveraendert."""
+    return {
+        "kind": b["kind"], "lo": round(b["lo"], dec), "hi": round(b["hi"], dec),
+        "t": b["t"], "status": b["status"], "with": trend == "neutral" or b["kind"] == trend,
+        "nur_anzeige": True,
+    }
+
+
 DUP_OVERLAP = 0.5   # "Neuer"-Meldung entfaellt, wenn eine aeltere gueltige Zone gleicher Richtung
                     # mehr als diesen Anteil der neuen Zonenhoehe ueberdeckt (dieselbe Zone, andere Kerze)
 
@@ -972,7 +982,13 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         # alle gültigen Zonen seit Tagesbeginn (gleiche Filter wie oben), auch ungültige gedämpft, für die Tagesansicht
         day_zones = [zone_out(b, df, times, levels, unit2, tf, trend, dec) for b in show_blocks[tf]
                      if b["t"] >= day_start and (b["adj"] or not ADJACENT) and (b["fvg"] or not b["fvg_known"] or tf == "H1")]
-        frames[tf] = {"candles": candles, "blocks": zones, "day": day_zones, "day_start": day_start}
+        # nur Anzeige: M5-Orderblock mit Kerzen zwischen Block und Impuls (sonst nicht im Chart, weil ADJACENT gilt)
+        anzeige = []
+        if tf == "M5":
+            anzeige = [anzeige_out(b, dec, trend) for b in show_blocks[tf]
+                       if not b["adj"] and b["status"] != "ungueltig" and b["t"] >= first_t]
+        frames[tf] = {"candles": candles, "blocks": zones, "day": day_zones, "day_start": day_start,
+                      "anzeige": anzeige}
     # LTF-Statistiktest: H1-Zone, Bestaetigung auf M5 (nur Statistik, keine Meldung)
     try:
         ltf_tr = ltf_trades(h1c, m5c, m5_full, blocks["H1"])
