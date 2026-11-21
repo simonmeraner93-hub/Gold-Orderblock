@@ -129,6 +129,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <div class="note">Testtrade 1:1 ohne Spread, Stop an der Zonenkante. Der Einstieg erscheint erst nach der Bestätigungskerze.</div>
     <label class="tog"><input type="checkbox" id="lv"> Tageshoch und Tagestief</label>
     <label class="tog"><input type="checkbox" id="hz"> H1-Zonen im M5-Chart</label>
+    <label class="tog"><input type="checkbox" id="nah" checked> OB mit Zwischenkerzen (nur Anzeige)</label>
     <label class="tog"><input type="checkbox" id="ema13" checked> EMA 13 (violett) im Chart</label>
   </div>
 
@@ -386,7 +387,7 @@ function pill(x,y,text,col,alpha){
   ctx.fillText(text,x+6,y+12);
 }
 
-function zoneBox(b,cs,cw,W,padR,y,cl,prefix,dash){
+function zoneBox(b,cs,cw,W,padR,y,cl,prefix,dash,suffix,noHit){
   const idx=cs.findIndex(c=>c.t>=Math.max(b.t,cs[0].t));
   if(idx<0)return;
   const x0=idx*cw;
@@ -404,13 +405,13 @@ function zoneBox(b,cs,cw,W,padR,y,cl,prefix,dash){
   const f2=(b.with?1:0.45)*(b.status==="ungueltig"?0.5:1);
   ctx.fillStyle="rgba("+col+","+((b.status==="angetestet"?0.07:0.12)*f2)+")";
   ctx.fillRect(x0,y1,x1-x0,h);
-  HITS.push({x0,x1,y1,y2:y1+h,b,tf:prefix?"H1":frame});
+  if(!noHit)HITS.push({x0,x1,y1,y2:y1+h,b,tf:prefix?"H1":frame});
   ctx.strokeStyle="rgba("+col+","+(0.45*f2)+")";
   ctx.lineWidth=1;
   ctx.setLineDash(dash?[4,3]:[]);
   ctx.strokeRect(x0+.5,y1+.5,x1-x0-1,h-1);
   ctx.setLineDash([]);
-  const label=(prefix?prefix+" ":"")+(b.kind==="long"?"Long":"Short")+" OB"+(b.status==="angetestet"?" · angetestet":"")+(b.status==="ungueltig"?" · ungültig":"");
+  const label=(prefix?prefix+" ":"")+(b.kind==="long"?"Long":"Short")+" OB"+(b.status==="angetestet"?" · angetestet":"")+(b.status==="ungueltig"?" · ungültig":"")+(suffix?" · "+suffix:"");
   // Beschriftung nur, wenn sie nicht über einer anderen Beschriftung liegt
   const ok=!labelsDrawn.some(p=>Math.abs(p.y-(y1+4))<16&&Math.abs(p.x-(x0+6))<170);
   if(ok){pill(x0+6,y1+4,label,col,f2);labelsDrawn.push({x:x0+6,y:y1+4});}
@@ -487,6 +488,12 @@ function draw(){
   pickZones(fr.blocks.concat(fr.day||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0).forEach(b=>{
     zoneBox(b,cs,cw,W,padR,y,cl,null,false);
   });
+  // nur Anzeige (wie TraderJe): M5-Orderblock mit Kerzen zwischen Block und Impuls. Kein Einstieg, keine Meldung, keine Statistik, nicht anklickbar
+  if($("nah").checked&&frame==="M5"){
+    pickZones((fr.anzeige||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0).forEach(b=>{
+      zoneBox(b,cs,cw,W,padR,y,cl,null,true,"nur Anzeige",true);
+    });
+  }
 
   cs.forEach((c,i)=>{
     const x=i*cw+cw/2;
@@ -789,7 +796,7 @@ $("ov").addEventListener("click",e=>{
   try{localStorage.setItem("mk",cur);}catch(err){}
   render();
 });
-["lv","hz","ema13"].forEach(id=>$(id).addEventListener("change",render));
+["lv","hz","nah","ema13"].forEach(id=>$(id).addEventListener("change",render));
 window.addEventListener("resize",draw);
 load();
 setInterval(load,60000);
