@@ -101,11 +101,17 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
   <div class="row tabs" style="margin-top:12px">
     <button class="btn on" data-v="mk">Märkte</button>
     <button class="btn" data-v="st">Übersicht</button>
+    <button class="btn" data-v="fw">Vorwärtstest</button>
   </div>
 
   <div id="vSt" hidden>
     <div class="sec">Übersicht · Gewinnquote</div>
     <div class="card" id="ovst"></div>
+  </div>
+
+  <div id="vFw" hidden>
+    <div class="sec">Break and Retest · Vorwärtstest (eigenständig, nicht im Orderblock-Chart)</div>
+    <iframe id="fwFrame" src="break-retest-forward.html" title="Break and Retest Vorwärtstest" style="width:100%;height:1600px;border:0;display:block;background:#0f1115"></iframe>
   </div>
 
   <div id="vMk">
@@ -769,10 +775,18 @@ $("chart").addEventListener("click",e=>{
 document.querySelector(".tabs").addEventListener("click",e=>{
   const t=e.target.closest("button[data-v]");if(!t)return;
   document.querySelectorAll("button[data-v]").forEach(b=>b.classList.toggle("on",b===t));
-  const st=t.dataset.v==="st";
-  $("vSt").hidden=!st;$("vMk").hidden=st;
-  if(!st)draw();
+  const v=t.dataset.v;
+  document.getElementById("vSt").hidden=v!=="st";
+  document.getElementById("vFw").hidden=v!=="fw";
+  document.getElementById("vMk").hidden=v!=="mk";
+  if(v==="mk")draw();
   window.scrollTo(0,0);
+});
+window.addEventListener("message",e=>{
+  const d=e.data;
+  if(!d||d.kind!=="br-forward-height")return;
+  const f=document.getElementById("fwFrame");
+  if(f&&e.source===f.contentWindow)f.style.height=(d.h+24)+"px";
 });
 function zoom(dir){
   let i=STEPS.indexOf(NC[frame]);if(i<0)i=2;
