@@ -64,7 +64,6 @@ UNIVERSE = [
     ("DAX", "Index", ["DE40", "GER40", "DAX40"]),
     ("FTSE 100", "Index", ["UK100"]),
     ("CAC 40", "Index", ["FR40", "FRA40"]),
-    ("Nikkei 225", "Index", ["JP225"]),
     ("EUR/USD", "Forex", ["EURUSD"]),
     ("GBP/USD", "Forex", ["GBPUSD"]),
     ("USD/JPY", "Forex", ["USDJPY"]),
@@ -83,8 +82,6 @@ UNIVERSE = [
     ("Netflix", "Aktie", ["Netflix"]),
     ("AMD", "Aktie", ["AMD"]),
     ("Coca-Cola", "Aktie", ["Coca-Cola"]),
-    ("JPMorgan", "Aktie", ["JPMorgan Chase"]),
-    ("Walmart", "Aktie", ["Walmart"]),
     ("Disney", "Aktie", ["Disney"]),
     ("Intel", "Aktie", ["Intel"]),
     ("Nike", "Aktie", ["Nike"]),
@@ -93,7 +90,7 @@ UNIVERSE = [
 TF_MIN = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}
 RES = {"M1": "MINUTE", "M5": "MINUTE_5", "M15": "MINUTE_15", "H1": "HOUR"}
 # Tage zurueck, in dieser Reihenfolge versucht (kuerzer, falls die API weniger Historie liefert)
-DAYS = {"M1": (120, 60, 30), "M5": (180, 120, 60), "M15": (365, 180, 90), "H1": (540, 365, 180)}
+DAYS = {"M1": (120, 60, 30, 14, 7, 3), "M5": (180, 120, 60), "M15": (365, 180, 90), "H1": (540, 365, 180)}
 
 # P = Pivot-Breite, W = Fenster fuer Retest und Bestaetigung, H = Haltezeit (Kerzen auf E)
 PARAMS = {
@@ -274,7 +271,9 @@ def outcome(h, l, c, j, d, entry, stop, tgt, rr, H):
     return d * (c[end] - entry) / risk, end, "Zeit"
 
 
-def simulate(E, trend, rr, P, W, H, spread, zone):
+def simulate(E, trend, rr, P, W, H, spread, zone, live=False):
+    """Trades der Regel. live=True: eine Bestaetigung auf der letzten Kerze zaehlt auch ohne Ausgang
+    (Ausgang 'offen'), damit die Live-Pruefung sie melden kann. Der Backtest nutzt live=False."""
     o, h, l, c, t = E["o"], E["h"], E["l"], E["c"], E["t"]
     n = len(c)
     a = atr(h, l, c)
@@ -318,9 +317,11 @@ def simulate(E, trend, rr, P, W, H, spread, zone):
                 tgt = entry + d * rr * risk
                 res = outcome(h, l, c, j, d, entry, stop, tgt, rr, H)
                 if res is None:
-                    continue
+                    if not live:
+                        continue
+                    res = (0.0, j, "offen")
                 r_g, x, why = res
-                trades.append({"j": j, "t": int(t[j]), "x": int(t[x]), "d": int(d),
+                trades.append({"j": j, "t": int(t[j]), "x": int(t[x]), "d": int(d), "L": float(L),
                                "entry": float(entry), "stop": float(stop), "tgt": float(tgt),
                                "rk": float(risk / aj), "R": float(r_g - spread / risk), "why": why})
                 busy = x
