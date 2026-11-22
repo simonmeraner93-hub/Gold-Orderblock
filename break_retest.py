@@ -161,6 +161,17 @@ def resolve(h, klasse, cands):
     return None, None
 
 
+def _get_prices(h, epic, params):
+    """Eine Preisabfrage. Bei 429 (zu viele Anfragen) mit Pause wiederholen."""
+    r = None
+    for attempt in range(4):
+        r = requests.get(f"{BASE}/prices/{epic}", headers=h, params=params, timeout=30)
+        if r.status_code != 429:
+            return r
+        time.sleep(3 * (attempt + 1))
+    return r
+
+
 def fetch(h, epic, tf, days, per_call=1000):
     """Mittelkurse (Bid/Ask) fuer einen Zeitrahmen, in Abschnitten, damit jede Anfrage unter dem Limit bleibt."""
     tfm = TF_MIN[tf]
@@ -172,12 +183,13 @@ def fetch(h, epic, tf, days, per_call=1000):
         nxt = min(cur + timedelta(days=chunk), end)
         params = {"resolution": RES[tf], "from": cur.strftime("%Y-%m-%dT%H:%M:%S"),
                   "to": nxt.strftime("%Y-%m-%dT%H:%M:%S"), "max": per_call}
-        for attempt in range(4):
-            r = requests.get(f"{BASE}/prices/{epic}", headers=h, params=params, timeout=30)
-            if r.status_code == 429:
-                time.sleep(3 * (attempt + 1))
-                continue
-            break
+        r = _get_prices(h, epic, params)
+        if r.status_code == 404 and nxt >= end:
+            # letzter Abschnitt bis jetzt: die Demo-API antwortet hier manchmal mit 404.
+            # Einmal warten, dann bis 5 Minuten vor dem Jetzt abrufen.
+            time.sleep(10)
+            params["to"] = (end - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S")
+            r = _get_prices(h, epic, params)
         r.raise_for_status()
         for p in r.json().get("prices", []):
             t = int(pd.Timestamp(p["snapshotTimeUTC"], tz="UTC").timestamp())
