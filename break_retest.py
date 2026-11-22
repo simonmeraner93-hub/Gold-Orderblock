@@ -418,6 +418,10 @@ def verdict(s):
 def analyse_market(data, spread):
     trend_cache, trades_by, results = {}, {}, {}
     for cfg in CONFIGS:
+        if cfg["E"] not in data or cfg["T"] not in data:
+            # Zeitrahmen fehlt (z. B. M1 nicht verfuegbar): Konfiguration ohne Trades
+            results[cfg["key"]] = {"all": stats([]), "is": stats([]), "oos": stats([])}
+            continue
         E, T = data[cfg["E"]], data[cfg["T"]]
         tk = (cfg["E"], cfg["T"])
         if tk not in trend_cache:
@@ -494,11 +498,14 @@ def run_shard(shard, of, out):
                         break
                     except Exception as e:
                         print(name, tf, days, "fehlgeschlagen:", e)
-            missing = [tf for tf in ("M1", "M5", "M15", "H1") if tf not in data]
+            # M5, M15, H1 sind Pflicht. Fehlt M1, laufen nur die Konfigurationen ohne M1 weiter.
+            missing = [tf for tf in ("M5", "M15", "H1") if tf not in data]
             if missing:
                 entry["error"] = "Kerzen fehlen: " + ", ".join(missing)
                 write(res, out)
                 continue
+            if "M1" not in data:
+                entry["hinweis"] = "M1 nicht verfuegbar: M1-Konfigurationen ohne Ergebnis"
             spread = measure_spread(h, epic)
             if not spread or spread <= 0:
                 entry["error"] = "Spread nicht gemessen"
