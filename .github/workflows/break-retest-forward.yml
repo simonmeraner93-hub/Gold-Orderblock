@@ -1,0 +1,38 @@
+name: Break and Retest Vorwaertstest
+
+on:
+  workflow_dispatch:
+  schedule:
+    # stuendlich werktags 9 bis 18 Uhr Berlin (UTC 8 bis 17), deckt beide Fenster ab
+    - cron: "5 8-17 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: break-retest-forward
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Vorwaertstest fortschreiben
+        run: python break_retest_forward.py
+        env:
+          CAPITAL_API_KEY: ${{ secrets.CAPITAL_API_KEY }}
+          CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
+          CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
+      - name: Ergebnis speichern
+        run: |
+          git config user.name "orderblock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/break_retest_forward.json docs/break_retest_forward_state.json
+          git diff --staged --quiet || git commit -m "break retest forward"
+          for i in 1 2 3; do git pull --rebase && git push && break || sleep 5; done

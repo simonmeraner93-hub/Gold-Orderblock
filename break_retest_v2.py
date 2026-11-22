@@ -79,8 +79,9 @@ def outcome_v2(h, l, c, j, d, entry, stop, risk, H):
     return r_close, end, "Zeit"
 
 
-def simulate_v2(E, trend, P, W, H, spread, zone):
-    """Gleiche Erkennung wie break_retest.simulate, aber Stop, Ziele und Filter nach V2."""
+def simulate_v2(E, trend, P, W, H, spread, zone, live=False):
+    """Gleiche Erkennung wie break_retest.simulate, aber Stop, Ziele und Filter nach V2.
+    live=True: Bestaetigung auf der letzten Kerze zaehlt auch ohne Ausgang (Vorwaertstest)."""
     o, h, l, c, t = E["o"], E["h"], E["l"], E["c"], E["t"]
     n = len(c)
     a = br.atr(h, l, c)
@@ -124,7 +125,9 @@ def simulate_v2(E, trend, P, W, H, spread, zone):
                 tgt2 = entry + d * TP2 * risk
                 res = outcome_v2(h, l, c, j, d, entry, stop, risk, H)
                 if res is None:
-                    continue
+                    if not live:
+                        continue
+                    res = (0.0, j, "offen")
                 r_g, x, why = res
                 trades.append({"j": j, "t": int(t[j]), "x": int(t[x]), "d": int(d), "L": float(L),
                                "entry": float(entry), "stop": float(stop), "tgt": float(tgt1),
