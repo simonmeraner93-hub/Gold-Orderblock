@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Break and Retest – Vorwärtstest</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: #0f1115; color: #e6e8ec; line-height: 1.45; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.35rem; margin: 8px 0 4px; }
+  h2 { font-size: 1.05rem; margin: 22px 0 8px; }
+  .muted { color: #8b93a1; font-size: 0.9rem; }
+  .card { background: #171a21; border: 1px solid #262b35; border-radius: 10px; padding: 12px 14px; margin-top: 12px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+  .tile { background: #171a21; border: 1px solid #262b35; border-radius: 10px; padding: 10px 12px; }
+  .tile b { display: block; font-size: 1.1rem; margin-top: 2px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 10px; }
+  .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: #8b93a1; flex: 1 1 200px; }
+  select { background: #171a21; color: #e6e8ec; border: 1px solid #333a46; border-radius: 8px;
+           padding: 8px 10px; font-size: 0.95rem; width: 100%; }
+  canvas { width: 100%; height: 340px; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.85rem; color: #8b93a1; margin-top: 8px; }
+  .sw { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid #262b35; white-space: nowrap; }
+  th { color: #8b93a1; font-weight: 600; font-size: 0.8rem; }
+  .long { color: #3ecf8e; } .short { color: #ff6b6b; }
+  .pos { color: #3ecf8e; } .neg { color: #ff6b6b; }
+  .wrap { overflow-x: auto; }
+  .notice { border-left: 3px solid #f5b841; padding: 8px 12px; background: #1d1b14; border-radius: 6px; font-size: 0.9rem; }
+  .empty { padding: 14px 0; color: #8b93a1; }
+  @media (max-width: 520px) { canvas { height: 260px; } th, td { padding: 6px 4px; font-size: 0.8rem; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Break and Retest – Vorwärtstest</h1>
+  <p class="muted">Eigene Seite, nicht mit dem Gold-Bot verbunden. Die feste Regel V2 wird ab dem Start
+     jeden Tag in den zwei Fenstern beobachtet. Keine Meldung, keine Handelsempfehlung.</p>
+
+  <div class="tiles">
+    <div class="tile"><span class="muted">Stand</span><b id="stand">–</b></div>
+    <div class="tile"><span class="muted">Start des Tests</span><b id="start">–</b></div>
+    <div class="tile"><span class="muted">Geschlossen / offen</span><b id="zahl">–</b></div>
+    <div class="tile"><span class="muted">Ø netto R</span><b id="avg">–</b></div>
+    <div class="tile"><span class="muted">Trefferquote</span><b id="win">–</b></div>
+  </div>
+
+  <div class="card filters">
+    <label>Markt<select id="markt"></select></label>
+    <label>Tag<select id="tag"></select></label>
+    <label>Fenster<select id="fenster">
+      <option value="09:00">09:00 bis 10:00 (Berlin)</option>
+      <option value="15:30">15:30 bis 16:30 (Berlin)</option>
+    </select></label>
+  </div>
+
+  <h2 id="ct">Chart</h2>
+  <div class="card">
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <span><i class="sw" style="border-color:#f5b841"></i>Level (Break)</span>
+      <span>▲/▼ Einstieg</span>
+      <span><i class="sw" style="border-color:#ff6b6b;border-top-style:dashed"></i>Stop</span>
+      <span><i class="sw" style="border-color:#3ecf8e;border-top-style:dotted"></i>3 R</span>
+      <span><i class="sw" style="border-color:#8ab4ff;border-top-style:dashed"></i>5 R</span>
+      <span>● Ausstieg</span>
+    </div>
+    <div class="empty" id="leer" hidden>Keine Kerzen für diesen Tag und dieses Fenster.</div>
+  </div>
+
+  <h2>Signale dieses Tages und Fensters</h2>
+  <div class="card wrap">
+    <table>
+      <thead><tr><th>Einstieg (Berlin)</th><th>Richtung</th><th>Level</th><th>Einstieg</th><th>Stop</th><th>3 R</th><th>5 R</th><th>Stand</th><th>Ausstieg</th><th>R</th></tr></thead>
+      <tbody id="tabelle"></tbody>
+    </table>
+    <div class="empty" id="keine" hidden>Kein Signal in diesem Fenster.</div>
+  </div>
+
+  <h2>Statistik</h2>
+  <div class="card wrap">
+    <table>
+      <thead><tr><th>Gruppe</th><th>Trades</th><th>Trefferquote</th><th>Ø netto R</th><th>Summe R</th></tr></thead>
+      <tbody id="stat"></tbody>
+    </table>
+  </div>
+
+  <h2>Journal (geschlossene Trades, neueste zuerst)</h2>
+  <div class="card wrap">
+    <table>
+      <thead><tr><th>Einstieg (Berlin)</th><th>Markt</th><th>Fenster</th><th>Richtung</th><th>R</th><th>Ausstieg</th></tr></thead>
+      <tbody id="journal"></tbody>
+    </table>
+    <div class="empty" id="jleer" hidden>Noch keine geschlossenen Trades.</div>
+  </div>
+
+  <div class="card" id="fehler" hidden><b>Fehler im letzten Lauf</b><div class="muted" id="fehlerliste"></div></div>
+
+  <h2>Hinweis</h2>
+  <div class="notice">
+    Die Regel V2 ist fest und wurde vorher festgelegt. Die Ergebnisse werden automatisch berechnet, nicht von Hand.
+    Netto nach gemessenem Spread, ohne Slippage und Kommission. Ein kleiner Stichprobenumfang sagt wenig.
+    Diese Seite ist Beobachtung, keine Handelsempfehlung.
+  </div>
+</main>
+
+<script>
+const RAW = "https://raw.githubusercontent.com/simonmeraner93-hub/Gold-Orderblock/main/docs/break_retest_forward.json";
+const GREEN = "#3ecf8e", RED = "#ff6b6b", AMBER = "#f5b841", BLUE = "#8ab4ff", GRID = "#262b35", TEXT = "#8b93a1";
+const FENSTER = { "09:00": { from: 540, to: 600, ctx: 420 }, "15:30": { from: 930, to: 990, ctx: 810 } };
+let DATA = null;
+const $ = id => document.getElementById(id);
+
+function berlin(t) {
+  const f = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const p = {}; f.formatToParts(new Date(t * 1000)).forEach(x => p[x.type] = x.value);
+  return { date: `${p.year}-${p.month}-${p.day}`, min: (+p.hour) * 60 + (+p.minute) };
+}
+function fmtBerlin(t) {
+  return new Date(t * 1000).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit",
+    hour: "2-digit", minute: "2-digit" });
+}
+function fmtHM(t) {
+  return new Date(t * 1000).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" });
+}
+function fmtNum(v) {
+  if (v === null || v === undefined) return "–";
+  return Number(v).toLocaleString("de-DE", { maximumFractionDigits: Math.abs(v) >= 100 ? 2 : 5 });
+}
+function fmtR(v) { return v === null || v === undefined ? "–" : (v > 0 ? "+" : "") + Number(v).toFixed(2); }
+function cls(v) { return v === null || v === undefined ? "" : v > 0 ? "pos" : v < 0 ? "neg" : ""; }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function winOf(t) {
+  const m = berlin(t).min;
+  for (const [k, w] of Object.entries(FENSTER)) if (m >= w.from && m < w.to) return k;
+  return "-";
+}
+
+async function load() {
+  try {
+    const r = await fetch(RAW + "?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch (e) {
+    const r = await fetch("break_retest_forward.json", { cache: "no-store" });
+    return await r.json();
+  }
+}
+
+function render(d) {
+  DATA = d;
+  $("stand").textContent = fmtBerlin(Math.floor(Date.parse(d.updated) / 1000));
+  $("start").textContent = fmtBerlin(Math.floor(Date.parse(d.start) / 1000));
+  const g = d.stats.gesamt || {};
+  $("zahl").textContent = `${g.n || 0} / ${d.stats.offen || 0}`;
+  $("avg").textContent = g.n ? fmtR(g.avg) : "–";
+  $("win").textContent = g.n ? g.win.toFixed(1) + " %" : "–";
+  if (d.errors && d.errors.length) {
+    $("fehler").hidden = false;
+    $("fehlerliste").innerHTML = d.errors.map(e => esc(e.name) + ": " + esc(e.error)).join("<br>");
+  }
+  $("markt").innerHTML = d.markets.map((m, i) => `<option value="${i}">${esc(m.name)}</option>`).join("");
+  const tage = new Set();
+  d.markets.forEach(m => (m.bars || []).forEach(b => tage.add(berlin(b[0]).date)));
+  const liste = [...tage].sort().reverse();
+  $("tag").innerHTML = liste.map(t => `<option value="${t}">${t}</option>`).join("");
+  $("markt").onchange = $("tag").onchange = $("fenster").onchange = draw;
+  renderStats(d);
+  renderJournal(d);
+  draw();
+}
+
+function renderStats(d) {
+  const s = d.stats;
+  const row = (name, x) => `<tr><td>${esc(name)}</td><td>${x.n || 0}</td>` +
+    `<td>${x.n ? x.win.toFixed(1) + " %" : "–"}</td><td class="${cls(x.avg)}">${x.n ? fmtR(x.avg) : "–"}</td>` +
+    `<td class="${cls(x.sum)}">${x.n ? fmtR(x.sum) : "–"}</td></tr>`;
+  let h = row("Gesamt", s.gesamt || {n: 0});
+  for (const [k, x] of Object.entries(s.je_fenster || {})) h += row("Fenster " + k, x);
+  for (const [k, x] of Object.entries(s.je_markt || {})) h += row("Markt " + k, x);
+  $("stat").innerHTML = h;
+}
+
+function renderJournal(d) {
+  const rows = (d.journal || []).slice().reverse();
+  $("journal").innerHTML = rows.map(s => {
+    const c = s.d > 0 ? "long" : "short";
+    return `<tr><td>${fmtBerlin(s.t)}</td><td>${esc(s.market)}</td><td>${esc(s.window)}</td>` +
+      `<td class="${c}">${s.d > 0 ? "Long" : "Short"}</td><td class="${cls(s.R)}">${fmtR(s.R)}</td>` +
+      `<td>${esc(s.why || "")}</td></tr>`;
+  }).join("");
+  $("jleer").hidden = rows.length > 0;
+}
+
+function draw() {
+  if (!DATA) return;
+  const mi = +$("markt").value || 0, m = DATA.markets[mi];
+  const day = $("tag").value, win = $("fenster").value, F = FENSTER[win];
+  $("ct").textContent = `Chart · ${m ? m.name : ""} · ${day} · ${win} bis ${win === "09:00" ? "10:00" : "16:30"}`;
+  const bars = (m && m.bars || []).filter(b => { const p = berlin(b[0]); return p.date === day && p.min >= F.ctx && p.min < F.to; });
+  const sigs = (m && m.signals || []).filter(s => berlin(s.t).date === day && winOf(s.t) === win);
+  renderSignals(sigs);
+  const cv = $("chart");
+  const W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  $("leer").hidden = bars.length > 0;
+  if (!bars.length) return;
+
+  const pad = { l: 8, r: 72, t: 10, b: 26 }, n = bars.length, bw = (W - pad.l - pad.r) / n;
+  let lo = Infinity, hi = -Infinity;
+  bars.forEach(b => { lo = Math.min(lo, b[3]); hi = Math.max(hi, b[2]); });
+  sigs.forEach(s => [s.L, s.stop, s.tgt2].forEach(v => { lo = Math.min(lo, v); hi = Math.max(hi, v); }));
+  const span = (hi - lo) || 1; lo -= span * 0.03; hi += span * 0.03;
+  const X = i => pad.l + (i + 0.5) * bw, Y = p => pad.t + (hi - p) / (hi - lo) * (H - pad.t - pad.b);
+  const idxOf = t => { let best = 0; for (let i = 0; i < n; i++) if (bars[i][0] <= t) best = i; return best; };
+
+  ctx.font = "11px system-ui, sans-serif"; ctx.strokeStyle = GRID; ctx.fillStyle = TEXT; ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const p = lo + (hi - lo) * k / 4, y = Y(p);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillText(fmtNum(p), W - pad.r + 6, y + 4);
+  }
+  bars.forEach((b, i) => {
+    const [, o, h, l, c] = b, col = c >= o ? GREEN : RED;
+    ctx.strokeStyle = col; ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(X(i), Y(h)); ctx.lineTo(X(i), Y(l)); ctx.stroke();
+    const y1 = Y(Math.max(o, c)), y2 = Y(Math.min(o, c));
+    ctx.fillRect(X(i) - bw * 0.35, y1, Math.max(bw * 0.7, 1), Math.max(y2 - y1, 1));
+  });
+  sigs.forEach(s => {
+    const i = idxOf(s.t);
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = AMBER;
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(s.L)); ctx.lineTo(W - pad.r, Y(s.L)); ctx.stroke();
+    ctx.strokeStyle = RED; ctx.beginPath(); ctx.moveTo(X(i), Y(s.stop)); ctx.lineTo(W - pad.r, Y(s.stop)); ctx.stroke();
+    ctx.setLineDash([2, 3]); ctx.strokeStyle = GREEN; ctx.beginPath(); ctx.moveTo(X(i), Y(s.tgt)); ctx.lineTo(W - pad.r, Y(s.tgt)); ctx.stroke();
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = BLUE; ctx.beginPath(); ctx.moveTo(X(i), Y(s.tgt2)); ctx.lineTo(W - pad.r, Y(s.tgt2)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = AMBER; const sz = 7; ctx.beginPath();
+    if (s.d > 0) { const y = Y(bars[i][3]) + 6; ctx.moveTo(X(i), y); ctx.lineTo(X(i) - sz, y + sz * 1.4); ctx.lineTo(X(i) + sz, y + sz * 1.4); }
+    else { const y = Y(bars[i][2]) - 6; ctx.moveTo(X(i), y); ctx.lineTo(X(i) - sz, y - sz * 1.4); ctx.lineTo(X(i) + sz, y - sz * 1.4); }
+    ctx.closePath(); ctx.fill();
+    if (s.exit_t && s.exit_p !== null) {
+      const j = idxOf(s.exit_t);
+      ctx.beginPath(); ctx.arc(X(j), Y(s.exit_p), 5, 0, Math.PI * 2);
+      ctx.fillStyle = (s.R || 0) >= 0 ? GREEN : RED; ctx.fill();
+    }
+  });
+  ctx.fillStyle = TEXT; const step = Math.max(1, Math.floor(n / 6));
+  for (let i = 0; i < n; i += step) ctx.fillText(fmtHM(bars[i][0]), X(i) - 16, H - 8);
+}
+
+function renderSignals(sigs) {
+  const rows = sigs.slice().sort((a, b) => a.t - b.t);
+  $("tabelle").innerHTML = rows.map(s => {
+    const c = s.d > 0 ? "long" : "short";
+    const ausstieg = s.exit_t ? `${fmtHM(s.exit_t)} · ${esc(s.why || "")}` : "–";
+    return `<tr><td>${fmtHM(s.t)}</td><td class="${c}">${s.d > 0 ? "Long" : "Short"}</td>` +
+      `<td>${fmtNum(s.L)}</td><td>${fmtNum(s.entry)}</td><td>${fmtNum(s.stop)}</td>` +
+      `<td>${fmtNum(s.tgt)}</td><td>${fmtNum(s.tgt2)}</td><td>${esc(s.status)}</td>` +
+      `<td>${ausstieg}</td><td class="${cls(s.R)}">${fmtR(s.R)}</td></tr>`;
+  }).join("");
+  $("keine").hidden = rows.length > 0;
+}
+
+window.addEventListener("resize", () => draw());
+(async () => {
+  try { render(await load()); }
+  catch (e) { $("chart").insertAdjacentHTML("afterend", '<div class="empty">Die Daten konnten nicht geladen werden.</div>'); }
+})();
+</script>
+</body>
+</html>
