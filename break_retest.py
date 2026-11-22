@@ -126,16 +126,21 @@ MIN_OOS = 30
 
 # ---------------------------------------------------------------- Daten
 
-def login():
-    r = requests.post(
-        f"{BASE}/session",
-        headers={"X-CAP-API-KEY": os.environ["CAPITAL_API_KEY"]},
-        json={"identifier": os.environ["CAPITAL_IDENTIFIER"],
-              "password": os.environ["CAPITAL_PASSWORD"]},
-        timeout=20,
-    )
-    r.raise_for_status()
-    return {"CST": r.headers["CST"], "X-SECURITY-TOKEN": r.headers["X-SECURITY-TOKEN"]}
+def login(max_tries=6):
+    """Anmeldung. Bei 429 (zu viele Anfragen) mit wachsender Pause wiederholen."""
+    for attempt in range(max_tries):
+        r = requests.post(
+            f"{BASE}/session",
+            headers={"X-CAP-API-KEY": os.environ["CAPITAL_API_KEY"]},
+            json={"identifier": os.environ["CAPITAL_IDENTIFIER"],
+                  "password": os.environ["CAPITAL_PASSWORD"]},
+            timeout=20,
+        )
+        if r.status_code == 429 and attempt < max_tries - 1:
+            time.sleep(30 * (attempt + 1))
+            continue
+        r.raise_for_status()
+        return {"CST": r.headers["CST"], "X-SECURITY-TOKEN": r.headers["X-SECURITY-TOKEN"]}
 
 
 def resolve(h, klasse, cands):
@@ -476,6 +481,7 @@ def meta():
 
 
 def run_shard(shard, of, out):
+    time.sleep(shard * 20)   # Teile nicht gleichzeitig anmelden (Capital drosselt sonst mit 429)
     h = login()
     items = [u for i, u in enumerate(UNIVERSE) if i % of == shard]
     res = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"), **meta(), "markets": []}
