@@ -68,14 +68,19 @@
       <span><i class="sw" style="border-color:#3ecf8e;border-top-style:dotted"></i>3 R</span>
       <span><i class="sw" style="border-color:#8ab4ff;border-top-style:dashed"></i>5 R</span>
       <span>● Ausstieg</span>
+      <span><i class="sw" style="border-color:#c9d1d9;border-top-style:dotted"></i>Schacht (Hoch bis Tief der Bestätigungskerze)</span>
+      <span>B Ausbruch · R Retest · E Einstieg</span>
     </div>
+    <p class="muted" style="margin:8px 0 0">Schacht: von der Ausbruchskerze (B) bis zum Einstieg (E), oben und unten
+      Hoch und Tief der Bestätigungskerze. R markiert die erste Berührung der Zone. Der Einstieg liegt am Schluss der
+      Bestätigungskerze, der Stop am Tief bzw. Hoch dieser Kerze.</p>
     <div class="empty" id="leer" hidden>Keine Kerzen für diesen Tag und dieses Fenster.</div>
   </div>
 
   <h2>Signale dieses Tages und Fensters</h2>
   <div class="card wrap">
     <table>
-      <thead><tr><th>Einstieg (Berlin)</th><th>Richtung</th><th>Level</th><th>Einstieg</th><th>Stop</th><th>3 R</th><th>5 R</th><th>Stand</th><th>Ausstieg</th><th>R</th></tr></thead>
+      <thead><tr><th>Einstieg (Berlin)</th><th>Richtung</th><th>Break</th><th>Retest</th><th>Level</th><th>Einstieg</th><th>Stop</th><th>3 R</th><th>5 R</th><th>Stand</th><th>Ausstieg</th><th>R</th></tr></thead>
       <tbody id="tabelle"></tbody>
     </table>
     <div class="empty" id="keine" hidden>Kein Signal in diesem Fenster.</div>
@@ -110,7 +115,7 @@
 
 <script>
 const RAW = "https://raw.githubusercontent.com/simonmeraner93-hub/Gold-Orderblock/main/docs/break_retest_forward.json";
-const GREEN = "#3ecf8e", RED = "#ff6b6b", AMBER = "#f5b841", BLUE = "#8ab4ff", GRID = "#262b35", TEXT = "#8b93a1";
+const GREEN = "#3ecf8e", RED = "#ff6b6b", AMBER = "#f5b841", BLUE = "#8ab4ff", GRID = "#262b35", TEXT = "#8b93a1", SHAFT = "#c9d1d9";
 const FENSTER = { "09:00": { from: 540, to: 600, ctx: 420 }, "15:30": { from: 930, to: 990, ctx: 810 } };
 let DATA = null;
 const $ = id => document.getElementById(id);
@@ -152,6 +157,11 @@ async function load() {
   }
 }
 
+function reportHeight() {
+  if (window.parent !== window) {
+    window.parent.postMessage({ kind: "br-forward-height", h: document.documentElement.scrollHeight }, "*");
+  }
+}
 function render(d) {
   DATA = d;
   $("stand").textContent = fmtBerlin(Math.floor(Date.parse(d.updated) / 1000));
@@ -169,10 +179,12 @@ function render(d) {
   d.markets.forEach(m => (m.bars || []).forEach(b => tage.add(berlin(b[0]).date)));
   const liste = [...tage].sort().reverse();
   $("tag").innerHTML = liste.map(t => `<option value="${t}">${t}</option>`).join("");
-  $("markt").onchange = $("tag").onchange = $("fenster").onchange = draw;
+  const redraw = () => { draw(); reportHeight(); };
+  $("markt").onchange = $("tag").onchange = $("fenster").onchange = redraw;
   renderStats(d);
   renderJournal(d);
   draw();
+  reportHeight();
 }
 
 function renderStats(d) {
@@ -217,7 +229,10 @@ function draw() {
   const pad = { l: 8, r: 72, t: 10, b: 26 }, n = bars.length, bw = (W - pad.l - pad.r) / n;
   let lo = Infinity, hi = -Infinity;
   bars.forEach(b => { lo = Math.min(lo, b[3]); hi = Math.max(hi, b[2]); });
-  sigs.forEach(s => [s.L, s.stop, s.tgt2].forEach(v => { lo = Math.min(lo, v); hi = Math.max(hi, v); }));
+  sigs.forEach(s => [s.L, s.stop, s.tgt2, s.conf_hi, s.conf_lo].forEach(v => {
+    if (v === undefined || v === null) return;
+    lo = Math.min(lo, v); hi = Math.max(hi, v);
+  }));
   const span = (hi - lo) || 1; lo -= span * 0.03; hi += span * 0.03;
   const X = i => pad.l + (i + 0.5) * bw, Y = p => pad.t + (hi - p) / (hi - lo) * (H - pad.t - pad.b);
   const idxOf = t => { let best = 0; for (let i = 0; i < n; i++) if (bars[i][0] <= t) best = i; return best; };
@@ -234,6 +249,24 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(X(i), Y(h)); ctx.lineTo(X(i), Y(l)); ctx.stroke();
     const y1 = Y(Math.max(o, c)), y2 = Y(Math.min(o, c));
     ctx.fillRect(X(i) - bw * 0.35, y1, Math.max(bw * 0.7, 1), Math.max(y2 - y1, 1));
+  });
+  // Schacht: Hoch bis Tief der Bestaetigungskerze, von Ausbruch (B) bis Einstieg (E); R = erste Beruehrung
+  sigs.forEach(s => {
+    if (s.bo_t === undefined || s.conf_hi === undefined || s.conf_lo === undefined) return;   // alte Signale ohne Schacht
+    const i = idxOf(s.t), ib = barIndexAt(bars, s.bo_t), ir = barIndexAt(bars, s.rt_t);
+    const xl = ib < 0 ? pad.l : X(ib) - bw * 0.5, xr = X(i) + bw * 0.5;
+    const yt = Y(s.conf_hi), hh = Math.max(Y(s.conf_lo) - yt, 1);
+    ctx.fillStyle = "rgba(201,209,217,0.10)"; ctx.fillRect(xl, yt, xr - xl, hh);
+    ctx.setLineDash([3, 3]); ctx.strokeStyle = SHAFT; ctx.strokeRect(xl, yt, xr - xl, hh); ctx.setLineDash([]);
+    [["B", ib, 0], ["R", ir, 1], ["E", i, 2]].forEach(([lab, k, row]) => {   // feste Zeile je Buchstabe
+      if (k < 0) return;
+      const x = X(k);
+      ctx.setLineDash([2, 3]); ctx.strokeStyle = "rgba(201,209,217,0.55)";
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = SHAFT; ctx.font = "bold 11px system-ui, sans-serif";
+      ctx.fillText(lab, x + 3, Math.max(pad.t + 10, yt - 4 - row * 13));
+      ctx.font = "11px system-ui, sans-serif";
+    });
   });
   sigs.forEach(s => {
     const i = idxOf(s.t);
@@ -257,12 +290,19 @@ function draw() {
   for (let i = 0; i < n; i += step) ctx.fillText(fmtHM(bars[i][0]), X(i) - 16, H - 8);
 }
 
+function barIndexAt(bars, t) {
+  let best = -1;
+  for (let i = 0; i < bars.length; i++) if (bars[i][0] <= t) best = i;
+  return best;
+}
+
 function renderSignals(sigs) {
   const rows = sigs.slice().sort((a, b) => a.t - b.t);
   $("tabelle").innerHTML = rows.map(s => {
     const c = s.d > 0 ? "long" : "short";
     const ausstieg = s.exit_t ? `${fmtHM(s.exit_t)} · ${esc(s.why || "")}` : "–";
     return `<tr><td>${fmtHM(s.t)}</td><td class="${c}">${s.d > 0 ? "Long" : "Short"}</td>` +
+      `<td>${s.bo_t !== undefined ? fmtHM(s.bo_t) : "–"}</td><td>${s.rt_t !== undefined ? fmtHM(s.rt_t) : "–"}</td>` +
       `<td>${fmtNum(s.L)}</td><td>${fmtNum(s.entry)}</td><td>${fmtNum(s.stop)}</td>` +
       `<td>${fmtNum(s.tgt)}</td><td>${fmtNum(s.tgt2)}</td><td>${esc(s.status)}</td>` +
       `<td>${ausstieg}</td><td class="${cls(s.R)}">${fmtR(s.R)}</td></tr>`;
@@ -270,7 +310,7 @@ function renderSignals(sigs) {
   $("keine").hidden = rows.length > 0;
 }
 
-window.addEventListener("resize", () => draw());
+window.addEventListener("resize", () => { draw(); reportHeight(); });
 (async () => {
   try { render(await load()); }
   catch (e) { $("chart").insertAdjacentHTML("afterend", '<div class="empty">Die Daten konnten nicht geladen werden.</div>'); }

@@ -105,17 +105,22 @@ def simulate_v2(E, trend, P, W, H, spread, zone, live=False):
             if d > 0:
                 touch = l[j] <= L + setup["zone"]
                 if touch or setup["touched"]:
+                    if not setup["touched"]:
+                        setup["rt"] = j        # erste Beruehrung der Zone (Retest)
                     setup["touched"] = True
                 confirm = c[j] > o[j] and c[j] > L + bf
             else:
                 touch = h[j] >= L - setup["zone"]
                 if touch or setup["touched"]:
+                    if not setup["touched"]:
+                        setup["rt"] = j
                     setup["touched"] = True
                 confirm = c[j] < o[j] and c[j] < L - bf
             if setup["touched"] and confirm:
                 entry = c[j]
                 stop = l[j] if d > 0 else h[j]
                 risk = abs(entry - stop)
+                bo_t, rt_t = int(t[setup["b"]]), int(t[setup["rt"]])   # nur fuer die Anzeige
                 setup = None
                 if risk <= 0 or risk > br.MAX_RISK * aj or risk < 2 * spread:
                     continue
@@ -132,7 +137,9 @@ def simulate_v2(E, trend, P, W, H, spread, zone, live=False):
                 trades.append({"j": j, "t": int(t[j]), "x": int(t[x]), "d": int(d), "L": float(L),
                                "entry": float(entry), "stop": float(stop), "tgt": float(tgt1),
                                "tgt2": float(tgt2), "rk": float(risk / aj),
-                               "R": float(r_g - spread / risk), "why": why})
+                               "R": float(r_g - spread / risk), "why": why,
+                               "bo_t": bo_t, "rt_t": rt_t,
+                               "conf_hi": float(h[j]), "conf_lo": float(l[j])})
                 busy = x
             continue
 
@@ -140,13 +147,13 @@ def simulate_v2(E, trend, P, W, H, spread, zone, live=False):
             L = lh[j]
             bf = br.BUF * aj
             if c[j - 1] <= L + bf < c[j]:
-                setup = {"d": 1, "L": L, "buf": bf, "zone": zone * aj, "b": j, "touched": False}
+                setup = {"d": 1, "L": L, "buf": bf, "zone": zone * aj, "b": j, "touched": False, "rt": None}
                 used_h = L
         elif tr < 0 and not np.isnan(ll[j]) and ll[j] != used_l:
             L = ll[j]
             bf = br.BUF * aj
             if c[j] < L - bf <= c[j - 1]:
-                setup = {"d": -1, "L": L, "buf": bf, "zone": zone * aj, "b": j, "touched": False}
+                setup = {"d": -1, "L": L, "buf": bf, "zone": zone * aj, "b": j, "touched": False, "rt": None}
                 used_l = L
     return trades
 

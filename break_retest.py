@@ -185,11 +185,9 @@ def fetch(h, epic, tf, days, per_call=1000):
                   "to": nxt.strftime("%Y-%m-%dT%H:%M:%S"), "max": per_call}
         r = _get_prices(h, epic, params)
         if r.status_code == 404 and nxt >= end:
-            # letzter Abschnitt bis jetzt: die Demo-API antwortet hier manchmal mit 404.
-            # Einmal warten, dann bis 5 Minuten vor dem Jetzt abrufen.
-            time.sleep(10)
-            params["to"] = (end - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S")
-            r = _get_prices(h, epic, params)
+            # Letzter Abschnitt ohne Kerzen, zum Beispiel am Wochenende: die Demo-API antwortet mit 404.
+            # Dann gibt es hier nichts mehr abzuholen, die bisherigen Kerzen bleiben.
+            break
         r.raise_for_status()
         for p in r.json().get("prices", []):
             t = int(pd.Timestamp(p["snapshotTimeUTC"], tz="UTC").timestamp())
