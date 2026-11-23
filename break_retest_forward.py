@@ -107,6 +107,8 @@ def run(out=OUT, state_path=STATE, now=None):
                     "d": int(x["d"]), "L": float(x["L"]), "entry": float(x["entry"]),
                     "stop": float(x["stop"]), "tgt": float(x["tgt"]), "tgt2": float(x["tgt2"]),
                     "risk": float(abs(x["entry"] - x["stop"])), "rk": float(x["rk"]),
+                    "bo_t": int(x["bo_t"]), "rt_t": int(x["rt_t"]),
+                    "conf_hi": float(x["conf_hi"]), "conf_lo": float(x["conf_lo"]),
                     "spread": float(spread), "status": "offen", "R": None, "why": None,
                     "exit_t": None, "exit_p": None,
                 }
