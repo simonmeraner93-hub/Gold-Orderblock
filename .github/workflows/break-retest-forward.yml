@@ -3,8 +3,8 @@ name: Break and Retest Vorwaertstest
 on:
   workflow_dispatch:
   schedule:
-    # stuendlich werktags 9 bis 18 Uhr Berlin (UTC 8 bis 17), deckt beide Fenster ab
-    - cron: "5 8-17 * * 1-5"
+    # alle 15 Minuten werktags 9 bis 18 Uhr Berlin (UTC 8 bis 17), deckt beide Fenster ab
+    - cron: "*/15 8-17 * * 1-5"
 
 permissions:
   contents: write
