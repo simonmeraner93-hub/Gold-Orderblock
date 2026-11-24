@@ -119,10 +119,13 @@ def run_market(h1, m5, spread):
 def agg(trades):
     ziele = sum(1 for t in trades if t["res"] == "ziel")
     stops = sum(1 for t in trades if t["res"] == "stop")
+    geschlossen = [t for t in trades if t["r"] is not None]
+    r_netto = sum(t["r"] for t in geschlossen)
+    kosten = sum(t["kosten_R"] for t in geschlossen)   # Spread in R, nur abgeschlossene Trades
     return {
         "trades": len(trades), "ziele": ziele, "stops": stops, "offen": len(trades) - ziele - stops,
         "gewinnquote": round(100 * ziele / (ziele + stops), 1) if ziele + stops else None,
-        "R": round(sum(t["r"] for t in trades if t["r"] is not None), 2),
+        "R": round(r_netto, 2), "kosten_R": round(kosten, 2), "R_brutto": round(r_netto + kosten, 2),
     }
 
 
@@ -154,6 +157,7 @@ def main():
         time.sleep(2)
     seit = time.time() - 60 * 86400
     res["statistik"] = agg(alle)
+    res["statistik_vor_60_tagen"] = agg([t for t in alle if t["t"] < seit])
     res["statistik_letzte_60_tage"] = agg([t for t in alle if t["t"] >= seit])
     res["trades"] = sorted(alle, key=lambda x: x["t"], reverse=True)
     br.write(res, OUT)
