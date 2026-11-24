@@ -147,7 +147,7 @@ def boot_ci(xs, n_boot=2000, seed=1):
     return [round(means[int(0.025 * n_boot)], 3), round(means[int(0.975 * n_boot) - 1], 3)]
 
 
-def agg(trades):
+def agg(trades, rr=RR):
     ziele = sum(1 for t in trades if t["res"] == "ziel")
     stops = sum(1 for t in trades if t["res"] == "stop")
     geschlossen = [t for t in trades if t["r"] is not None]
@@ -161,7 +161,7 @@ def agg(trades):
         "gewinnquote": round(100 * ziele / (ziele + stops), 1) if ziele + stops else None,
         "gewinnquote_ci95": wilson(ziele, ziele + stops),
         # Trefferquote, ab der der Test mit Spread im Plus liegt: p * (RR + 1) = 1 + Spread je Trade
-        "breakeven_gewinnquote": round(100 * (1 + k_je) / (1 + RR), 1) if n else None,
+        "breakeven_gewinnquote": round(100 * (1 + k_je) / (1 + rr), 1) if n else None,
         "R": round(r_netto, 2), "kosten_R": round(kosten, 2), "R_brutto": round(r_netto + kosten, 2),
         "R_je_trade": round(r_netto / n, 3) if n else None,
         "R_je_trade_ci95": boot_ci(rs),
@@ -174,7 +174,7 @@ def agg(trades):
 def agg_variante(trades, name):
     """Kennzahlen einer Variante aus denselben Einstiegen, nur mit deren Ziel-Ergebnis."""
     return agg([{"res": t["varianten"][name]["res"], "r": t["varianten"][name]["r"],
-                 "kosten_R": t["kosten_R"]} for t in trades])
+                 "kosten_R": t["kosten_R"]} for t in trades], VARIANTEN[name])
 
 
 def besser(s):
