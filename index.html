@@ -438,28 +438,19 @@ function pickZones(list,cs,lo,hi,limit){
   return limit?arr.slice(0,limit):arr;
 }
 
-// BOS (Break of Structure), nur Anzeige. Swing-Hoch bzw. -Tief = Kerze mit je zwei tieferen (bzw. hoeheren) Kerzen links und rechts.
-// BOS = Schlusskurs bricht das letzte bestaetigte Swing. Ein Swing zaehlt nur, wenn davor kein Schluss darueber bzw. darunter lag.
-// Keine Wirkung auf Regel, Einstieg oder Statistik.
+// BOS (Break of Structure), nur Anzeige. Gleiche Erkennung wie im Bot: Schlusskurs ueber dem hoechsten Hoch der
+// letzten 10 Kerzen (bei Short unter dem tiefsten Tief). Ein Bruch desselben Niveaus wird nur einmal gezeichnet.
+// Keine Koerpergroesse-Bedingung (die gehoert zum Impuls im Bot). Keine Wirkung auf Regel, Einstieg oder Statistik.
 function bosSeries(cs){
-  const out=[];let sh=null,sl=null;
-  for(let j=2;j<cs.length;j++){
-    const k=j-2;
-    if(k>=2){
-      const c=cs[k];
-      let ok=true;
-      if(c.h>cs[k-1].h&&c.h>cs[k-2].h&&c.h>cs[k+1].h&&c.h>cs[k+2].h){
-        for(let q=k+1;q<=j;q++)if(cs[q].c>c.h){ok=false;break;}
-        if(ok)sh={p:c.h,k};
-      }
-      ok=true;
-      if(c.l<cs[k-1].l&&c.l<cs[k-2].l&&c.l<cs[k+1].l&&c.l<cs[k+2].l){
-        for(let q=k+1;q<=j;q++)if(cs[q].c<c.l){ok=false;break;}
-        if(ok)sl={p:c.l,k};
-      }
+  const out=[];
+  for(let j=10;j<cs.length;j++){
+    let hiI=j-10, loI=j-10;
+    for(let q=j-10;q<j;q++){
+      if(cs[q].h>cs[hiI].h)hiI=q;
+      if(cs[q].l<cs[loI].l)loI=q;
     }
-    if(sh&&cs[j].c>sh.p){out.push({i:j,k:sh.k,t:cs[j].t,d:1,p:sh.p});sh=null;}
-    if(sl&&cs[j].c<sl.p){out.push({i:j,k:sl.k,t:cs[j].t,d:-1,p:sl.p});sl=null;}
+    if(cs[j].c>cs[hiI].h && !(cs[j-1].c>cs[hiI].h))out.push({i:j,k:hiI,t:cs[j].t,d:1,p:cs[hiI].h});
+    if(cs[j].c<cs[loI].l && !(cs[j-1].c<cs[loI].l))out.push({i:j,k:loI,t:cs[j].t,d:-1,p:cs[loI].l});
   }
   return out;
 }
