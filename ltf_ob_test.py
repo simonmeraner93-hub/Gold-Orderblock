@@ -6,7 +6,7 @@ Je Markt:
 2. Danach ein M5-Orderblock gleicher Richtung, dessen Zone ganz innerhalb der H1-Zone liegt.
 3. Auf M5: Antest des M5-Blocks und Bestaetigungskerze (ltf_confirm aus signal_check.py).
 4. Nur in Richtung des H1-Trends zum Zeitpunkt der Bestaetigung.
-5. Stop an der Kante des M5-Blocks, Ziel 1,5 R. R ohne Spread.
+5. Stop an der Kante des M5-Blocks, Ziel 1,5 R. R netto nach gemessenem Spread (Spread/Risiko je Trade).
 Pro H1-Block hoechstens ein Trade (der erste passende M5-Block mit Bestaetigung).
 """
 import os
@@ -30,7 +30,7 @@ M5_DAYS = 180
 H1_DAYS = 540
 RR = sc.LTF_RR   # 1,5, wie beim LTF-Test
 HINWEIS = ("Test: H1-Orderblock, darin M5-Orderblock, Einstieg auf der Bestaetigung. Nur Statistik, "
-           "kein Alarm, kein Telegram. R ohne Spread. Keine Handelsempfehlung.")
+           "kein Alarm, kein Telegram. R netto nach gemessenem Spread. Keine Handelsempfehlung.")
 
 
 def to_df(E):
@@ -55,8 +55,9 @@ def outcome(m5, j, long_, stop, tgt):
     return "offen", None
 
 
-def run_market(h1, m5):
-    """Trades und Trichter. Der Trichter zaehlt H1-Bloecke, die bis zu der jeweiligen Stufe kamen."""
+def run_market(h1, m5, spread):
+    """Trades und Trichter. Der Trichter zaehlt H1-Bloecke, die bis zu der jeweiligen Stufe kamen.
+    Kausal: Kein Blockstatus aus spaeteren Kerzen. Gueltigkeit prueft ltf_confirm nur bis zum Einstieg."""
     fun = {"H1-Block mit Regel": 0, "M5-Block in der H1-Zone": 0, "Bestaetigung auf M5": 0, "Trend passt": 0}
     trades = []
     if len(h1) < 61 or len(m5) < 2:
@@ -65,7 +66,7 @@ def run_market(h1, m5):
     h1_t = [int(x.timestamp()) for x in h1.time]
     m5_t = [int(x.timestamp()) for x in m5.time]
     blocks_h1 = sc.find_blocks(h1)
-    blocks_m5 = [b for b in sc.find_blocks(m5, loose=True) if b["status"] != "ungueltig"]
+    blocks_m5 = sc.find_blocks(m5, loose=True)   # ohne Statusfilter: "ungueltig" wird aus spaeteren Kerzen bestimmt
     for b in blocks_h1:
         k, i = b["k"], b["i"]
         if k != i - 1 or not b["fvg"] or i + 1 >= len(h1) or i + 1 < 60:
@@ -75,7 +76,8 @@ def run_market(h1, m5):
         if not zhi - zlo > 0:
             continue
         fun["H1-Block mit Regel"] += 1
-        s = next((q for q, t in enumerate(m5_t) if t >= h1_t[i] + 3600), None)   # Ende des H1-Impulses
+        # FVG des H1-Blocks ist erst nach Schluss der Folgekerze i+1 bekannt, also startet die Suche danach
+        s = next((q for q, t in enumerate(m5_t) if t >= h1_t[i + 1] + 3600), None)
         if s is None:
             continue
         stufe = 0
@@ -103,10 +105,12 @@ def run_market(h1, m5):
                 continue
             tgt = price + RR * risk if long_ else price - RR * risk
             res, r = outcome(m5, j, long_, stop, tgt)
+            kosten = spread / risk   # Spread in Risikoeinheiten, wie in break_retest
             fun["Trend passt"] += 1
             trades.append({"t": m5_t[j], "kind": b["kind"], "h1_block_t": int(b["t"]),
                            "m5_block_t": int(mb["t"]), "entry": price, "stop": stop, "tgt": tgt,
-                           "res": res, "r": r})
+                           "kosten_R": round(kosten, 3), "res": res,
+                           "r": None if r is None else round(r - kosten, 3)})
             break
     trades.sort(key=lambda x: x["t"], reverse=True)
     return trades, fun
@@ -133,9 +137,12 @@ def main():
             epic, _ = br.resolve(h, "CFD", cands)
             if epic is None:
                 raise RuntimeError("Markt nicht gefunden")
+            spread = br.measure_spread(h, epic)
+            if not spread or spread <= 0:
+                raise RuntimeError("Spread nicht gemessen")
             H1 = to_df(br.fetch(h, epic, "H1", H1_DAYS))
             M5 = to_df(br.fetch(h, epic, "M5", M5_DAYS))
-            trades, fun = run_market(H1, M5)
+            trades, fun = run_market(H1, M5, spread)
             for t in trades:
                 t["markt"] = name
             alle += trades
@@ -145,7 +152,9 @@ def main():
             res["errors"].append({"markt": name, "fehler": m["fehler"]})
         res["maerkte"][name] = m
         time.sleep(2)
+    seit = time.time() - 60 * 86400
     res["statistik"] = agg(alle)
+    res["statistik_letzte_60_tage"] = agg([t for t in alle if t["t"] >= seit])
     res["trades"] = sorted(alle, key=lambda x: x["t"], reverse=True)
     br.write(res, OUT)
     print("Trades:", len(alle), "Fehler:", len(res["errors"]))
