@@ -50,11 +50,24 @@ CHAT = os.environ["TELEGRAM_CHAT_ID"]
 APP_URL = "https://simonmeraner93-hub.github.io/Gold-Orderblock/"
 
 
+def _privater_chat():
+    """Mini-App-Knoepfe (web_app) gibt es nur in privaten Chats mit dem Bot. Privater Chat = positive Chat-ID."""
+    try:
+        return int(CHAT) > 0
+    except ValueError:
+        return False
+
+
 def tg(text, url=None):
     data = {"chat_id": CHAT, "text": text}
     if url:
-        # Knopf unter der Meldung: oeffnet den Chart direkt bei dieser Zone
-        data["reply_markup"] = json.dumps({"inline_keyboard": [[{"text": "📊 Chart öffnen", "url": url}]]})
+        # Knopf unter der Meldung: oeffnet den Chart direkt bei dieser Zone.
+        # Im privaten Chat als Mini-App (oeffnet in Telegram ohne Rueckfrage), sonst als normaler Link.
+        if _privater_chat():
+            knopf = {"text": "📊 Chart öffnen", "web_app": {"url": url}}
+        else:
+            knopf = {"text": "📊 Chart öffnen", "url": url}
+        data["reply_markup"] = json.dumps({"inline_keyboard": [[knopf]]})
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         data=data,
