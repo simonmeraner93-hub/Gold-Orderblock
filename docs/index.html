@@ -131,6 +131,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <label class="tog"><input type="checkbox" id="hz"> H1-Zonen im M5-Chart</label>
     <label class="tog"><input type="checkbox" id="nah" checked> OB mit Zwischenkerzen (nur Anzeige)</label>
     <label class="tog"><input type="checkbox" id="ema13" checked> EMA 13 (violett) im Chart</label>
+    <label class="tog"><input type="checkbox" id="bos" checked> BOS im Chart (nur Anzeige)</label>
   </div>
 
   <div class="card" id="zdet" hidden></div>
@@ -152,7 +153,14 @@ const STEPS=[30,45,60,90,150];
 const CONF={M5:12,H1:6};
 const STRONG=1.5; // Bestätigungskerze muss so groß sein wie der Impuls (x Durchschnittskörper der letzten 20)
 function bodyAvg(cs,j){let s=0,n=0;for(let q=Math.max(0,j-20);q<j;q++){s+=Math.abs(cs[q].c-cs[q].o);n++;}return n?s/n:0;}
-try{const s=localStorage.getItem("mk");if(s)cur=s;}catch(e){}
+// Ansicht merken (Markt, Zeitrahmen, Reiter), damit Neuladen (Wischen nach unten) dort weitermacht
+let UIV="mk";
+function saveUI(){try{localStorage.setItem("ui",JSON.stringify({m:cur,f:frame,v:UIV}));}catch(e){}}
+try{
+  const s=JSON.parse(localStorage.getItem("ui")||"null");
+  if(s){if(s.m)cur=s.m;if(s.f==="M5"||s.f==="H1")frame=s.f;if(s.v==="mk"||s.v==="st")UIV=s.v;}
+  else{const old=localStorage.getItem("mk");if(old)cur=old;}
+}catch(e){}
 const cv=document.getElementById("cv");
 const ctx=cv.getContext("2d");
 const $=id=>document.getElementById(id);
@@ -255,13 +263,21 @@ async function load(){
     DATA=await r.json();
     const first=!deepDone; deepDone=true;
     const deep=first&&applyLink();
+    if(deep)saveUI();
+    if(!DATA.markets.some(x=>x.key===cur)&&DATA.markets.length)cur=DATA.markets[0].key;
     render();
+    if(first&&!deep)restoreView();
     if(deep)setTimeout(()=>$("chart").scrollIntoView({behavior:"smooth",block:"start"}),50);
   }catch(e){
     $("upd").textContent="Daten konnten nicht geladen werden ("+e.message+")";
   }
 }
 
+// Gespeicherten Reiter und Zeitrahmen nach dem Neuladen wieder anzeigen
+function restoreView(){
+  document.querySelectorAll("button[data-f]").forEach(b=>b.classList.toggle("on",b.dataset.f===frame));
+  if(UIV!=="mk"){const tb=document.querySelector('button[data-v="'+UIV+'"]');if(tb)tb.click();}
+}
 function overview(){
   const m0=M();
   $("ov").innerHTML=VALID().map(m=>{
@@ -437,6 +453,29 @@ function pickZones(list,cs,lo,hi,limit){
   return limit?arr.slice(0,limit):arr;
 }
 
+// BOS (Break of Structure), nur Anzeige. Gleiche Erkennung wie im Bot: Schlusskurs ueber dem hoechsten Hoch der
+// letzten 10 Kerzen (bei Short unter dem tiefsten Tief). Ein Bruch desselben Niveaus wird nur einmal gezeichnet.
+// Keine Koerpergroesse-Bedingung (die gehoert zum Impuls im Bot). Keine Wirkung auf Regel, Einstieg oder Statistik.
+function bosSeries(cs){
+  const out=[];
+  for(let j=10;j<cs.length;j++){
+    let hiI=j-10, loI=j-10;
+    for(let q=j-10;q<j;q++){
+      if(cs[q].h>cs[hiI].h)hiI=q;
+      if(cs[q].l<cs[loI].l)loI=q;
+    }
+    if(cs[j].c>cs[hiI].h && !(cs[j-1].c>cs[hiI].h))out.push({i:j,k:hiI,t:cs[j].t,d:1,p:cs[hiI].h});
+    if(cs[j].c<cs[loI].l && !(cs[j-1].c<cs[loI].l))out.push({i:j,k:loI,t:cs[j].t,d:-1,p:cs[loI].l});
+  }
+  return out;
+}
+// Letzter BOS in Richtung der Zone, seit die Zone entstanden ist (nur Anzeige im Reiter)
+function bosChip(b,bl){
+  const dir=b.kind==="long"?1:-1;
+  const hit=bl.filter(x=>x.d===dir&&x.t>=b.t).pop();
+  return hit?'<span>BOS '+(hit.d>0?"↑":"↓")+' '+tm(hit.t)+'</span>':'';
+}
+
 function draw(){
   const d=window.devicePixelRatio||1;
   const W=cv.clientWidth,H=cv.clientHeight;
@@ -516,6 +555,22 @@ function draw(){
     em.forEach((v,i)=>{const x=i*cw+cw/2,yy=y(v);if(i)ctx.lineTo(x,yy);else ctx.moveTo(x,yy);});
     ctx.stroke();
     ctx.lineWidth=1;
+  }
+
+  // BOS (nur Anzeige): gestrichelte graue Linie vom Swing bis zum Durchbruch, ohne Einfluss auf Regel und Statistik
+  if($("bos").checked){
+    bosSeries(all).filter(b=>b.i>=s0&&b.i<s1).forEach(b=>{
+      const yy=y(b.p);
+      const xA=(Math.max(b.k,s0)-s0)*cw+cw/2, xB=(b.i-s0)*cw+cw/2;
+      ctx.strokeStyle="rgba(148,163,184,.85)";
+      ctx.lineWidth=1;
+      ctx.setLineDash([4,3]);
+      ctx.beginPath();ctx.moveTo(xA,yy);ctx.lineTo(xB,yy);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle="rgba(148,163,184,1)";
+      ctx.textAlign="left";
+      ctx.fillText("BOS "+(b.d>0?"↑":"↓"),xB+3,yy-4);
+    });
   }
 
   if($("lv").checked){
@@ -621,6 +676,7 @@ function list(){
   const m=M();if(!m)return;
   $("zt").textContent="Zonen "+m.name+" · "+frame;
   const last=lastPrice(m);
+  const bosAll=bosSeries(m.frames[frame].candles);
   const rows=tradesFor(m,frame).sort((a,b)=>Math.abs((a.b.lo+a.b.hi)/2-last)-Math.abs((b.b.lo+b.b.hi)/2-last));
   const txt={
     ziel:"✓ 1:1 erreicht",
@@ -642,7 +698,7 @@ function list(){
     }
     return '<div class="zi '+b.kind+(b.with?'':' ag')+'" data-zk="'+b.kind+'-'+b.t+'"><div class="h"><span><b>'+(L?'▲ Long':'▼ Short')+'</b> <span class="r">'+fx(b.lo,m)+' – '+fx(b.hi,m)+'</span></span><span class="st '+(b.status==="angetestet"?"an":"")+'">'+(ST[b.status]||"")+'</span></div>'+
       '<div class="meta">'+tm(b.t)+'</div>'+
-      '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span></div>'+checklist(b,m)+pt+'</div>';
+      '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span>'+bosChip(b,bosAll)+'</div>'+checklist(b,m)+pt+'</div>';
   }).join("")||'<p class="mut">Keine Zonen in diesem Fenster</p>';
 }
 
@@ -743,6 +799,7 @@ function attBar(){
 $("att").addEventListener("click",e=>{
   const t=e.target.closest("[data-zk]");if(!t)return;
   cur=t.dataset.k;frame=t.dataset.tf;
+  saveUI();
   SEL={k:t.dataset.zk,tf:t.dataset.tf};
   render();
   $("chart").scrollIntoView({behavior:"smooth",block:"start"});
@@ -763,6 +820,7 @@ $("chart").addEventListener("click",e=>{
   const t=e.target.closest("button[data-f]");
   if(!t)return;
   frame=t.dataset.f;
+  saveUI();
   document.querySelectorAll("button[data-f]").forEach(b=>b.classList.toggle("on",b===t));
   render();
 });
@@ -770,6 +828,7 @@ document.querySelector(".tabs").addEventListener("click",e=>{
   const t=e.target.closest("button[data-v]");if(!t)return;
   document.querySelectorAll("button[data-v]").forEach(b=>b.classList.toggle("on",b===t));
   const v=t.dataset.v;
+  UIV=v;saveUI();
   document.getElementById("vSt").hidden=v!=="st";
   document.getElementById("vMk").hidden=v!=="mk";
   if(v==="mk")draw();
@@ -794,10 +853,10 @@ $("ov").addEventListener("click",e=>{
   const o=e.target.closest(".mc");
   if(!o)return;
   cur=o.dataset.k;
-  try{localStorage.setItem("mk",cur);}catch(err){}
+  saveUI();
   render();
 });
-["lv","hz","nah","ema13"].forEach(id=>$(id).addEventListener("change",render));
+["lv","hz","nah","ema13","bos"].forEach(id=>$(id).addEventListener("change",render));
 window.addEventListener("resize",draw);
 load();
 setInterval(load,60000);
