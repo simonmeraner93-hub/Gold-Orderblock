@@ -153,7 +153,14 @@ const STEPS=[30,45,60,90,150];
 const CONF={M5:12,H1:6};
 const STRONG=1.5; // Bestätigungskerze muss so groß sein wie der Impuls (x Durchschnittskörper der letzten 20)
 function bodyAvg(cs,j){let s=0,n=0;for(let q=Math.max(0,j-20);q<j;q++){s+=Math.abs(cs[q].c-cs[q].o);n++;}return n?s/n:0;}
-try{const s=localStorage.getItem("mk");if(s)cur=s;}catch(e){}
+// Ansicht merken (Markt, Zeitrahmen, Reiter), damit Neuladen (Wischen nach unten) dort weitermacht
+let UIV="mk";
+function saveUI(){try{localStorage.setItem("ui",JSON.stringify({m:cur,f:frame,v:UIV}));}catch(e){}}
+try{
+  const s=JSON.parse(localStorage.getItem("ui")||"null");
+  if(s){if(s.m)cur=s.m;if(s.f==="M5"||s.f==="H1")frame=s.f;if(s.v==="mk"||s.v==="st")UIV=s.v;}
+  else{const old=localStorage.getItem("mk");if(old)cur=old;}
+}catch(e){}
 const cv=document.getElementById("cv");
 const ctx=cv.getContext("2d");
 const $=id=>document.getElementById(id);
@@ -256,13 +263,21 @@ async function load(){
     DATA=await r.json();
     const first=!deepDone; deepDone=true;
     const deep=first&&applyLink();
+    if(deep)saveUI();
+    if(!DATA.markets.some(x=>x.key===cur)&&DATA.markets.length)cur=DATA.markets[0].key;
     render();
+    if(first&&!deep)restoreView();
     if(deep)setTimeout(()=>$("chart").scrollIntoView({behavior:"smooth",block:"start"}),50);
   }catch(e){
     $("upd").textContent="Daten konnten nicht geladen werden ("+e.message+")";
   }
 }
 
+// Gespeicherten Reiter und Zeitrahmen nach dem Neuladen wieder anzeigen
+function restoreView(){
+  document.querySelectorAll("button[data-f]").forEach(b=>b.classList.toggle("on",b.dataset.f===frame));
+  if(UIV!=="mk"){const tb=document.querySelector('button[data-v="'+UIV+'"]');if(tb)tb.click();}
+}
 function overview(){
   const m0=M();
   $("ov").innerHTML=VALID().map(m=>{
@@ -784,6 +799,7 @@ function attBar(){
 $("att").addEventListener("click",e=>{
   const t=e.target.closest("[data-zk]");if(!t)return;
   cur=t.dataset.k;frame=t.dataset.tf;
+  saveUI();
   SEL={k:t.dataset.zk,tf:t.dataset.tf};
   render();
   $("chart").scrollIntoView({behavior:"smooth",block:"start"});
@@ -804,6 +820,7 @@ $("chart").addEventListener("click",e=>{
   const t=e.target.closest("button[data-f]");
   if(!t)return;
   frame=t.dataset.f;
+  saveUI();
   document.querySelectorAll("button[data-f]").forEach(b=>b.classList.toggle("on",b===t));
   render();
 });
@@ -811,6 +828,7 @@ document.querySelector(".tabs").addEventListener("click",e=>{
   const t=e.target.closest("button[data-v]");if(!t)return;
   document.querySelectorAll("button[data-v]").forEach(b=>b.classList.toggle("on",b===t));
   const v=t.dataset.v;
+  UIV=v;saveUI();
   document.getElementById("vSt").hidden=v!=="st";
   document.getElementById("vMk").hidden=v!=="mk";
   if(v==="mk")draw();
@@ -835,7 +853,7 @@ $("ov").addEventListener("click",e=>{
   const o=e.target.closest(".mc");
   if(!o)return;
   cur=o.dataset.k;
-  try{localStorage.setItem("mk",cur);}catch(err){}
+  saveUI();
   render();
 });
 ["lv","hz","nah","ema13","bos"].forEach(id=>$(id).addEventListener("change",render));
