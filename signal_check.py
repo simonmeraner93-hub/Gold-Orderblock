@@ -866,6 +866,32 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
                              dec, b, trend, sw), chart_link(key, tf, b))
                 state[skey] = now.timestamp()
 
+        # ---- Entstehungsmeldung nur fuer Anzeige-Zonen (M5, Kerzen zwischen Block und Impuls) ----
+        # Nur "Neu", kein Antest, kein Einstieg, keine Statistik. Gleiche Filter wie bei normalen Zonen.
+        for b in blocks["M5"]:
+            if b["adj"] or b["status"] == "ungueltig":
+                continue
+            if b["fvg_known"] and not b["fvg"]:
+                continue
+            df_m5, _, mins_m5 = dfs["M5"]
+            close_t = df_m5.iloc[b["i"]].time + timedelta(minutes=mins_m5)
+            if close_t < cutoff:
+                continue
+            if not in_trend(b["kind"], trend):
+                continue
+            if _dublette(b, blocks["M5"]):
+                continue
+            skey = f"{epic}-M5-{b['kind']}-{b['t']}-anzeige"
+            if skey in state:
+                continue
+            long_ = b["kind"] == "long"
+            icon = "🟢" if long_ else "🔴"
+            sw = sweep_info(df_m5, b, levels, "letzten 4 Std.")
+            tg(alert_msg(name_disp, "M5", icon,
+                         f"🆕 Neuer {'Long' if long_ else 'Short'}-Orderblock (nur Anzeige)",
+                         dec, b, trend, sw), chart_link(key, "M5", b))
+            state[skey] = now.timestamp()
+
         # ---- Antest-Meldungen ----
         for tf, (df, full_tf, mins) in dfs.items():
             now_price = float(full_tf.iloc[-1].close)
