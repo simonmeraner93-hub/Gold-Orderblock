@@ -450,6 +450,27 @@ function pickZones(list,cs,lo,hi,limit){
   arr.sort((p,q)=>(p.status==="ungueltig")-(q.status==="ungueltig")||dist(p)-dist(q));
   return limit?arr.slice(0,limit):arr;
 }
+// Doppelte Zonen im Chart: Eine neuere Zone gleicher Richtung, die die aeltere zu mehr als der Haelfte ihrer Hoehe
+// ueberdeckt, wird nicht gezeichnet (wie bei den Meldungen). Die aeltere bleibt, mit Status "angetestet", falls die neuere so war.
+// Nur Anzeige: Bot und Meldungen bleiben unveraendert. Ungueltige Zonen werden nicht zusammengelegt.
+function dedupeAlike(list){
+  const byT=[...list].sort((p,q)=>p.t-q.t);
+  const kept=[], drop=new Set(), copy=new Map();
+  for(const b of byT){
+    if(b.status==="ungueltig"){copy.set(b,b);continue;}
+    const h=b.hi-b.lo;
+    const o=kept.find(z=>z.kind===b.kind&&Math.min(z.hi,b.hi)-Math.max(z.lo,b.lo)>0.5*h);
+    if(o){
+      if(b.status==="angetestet"&&o.status!=="angetestet")o.status="angetestet";
+      drop.add(b);
+      continue;
+    }
+    const c=Object.assign({},b);
+    copy.set(b,c);
+    kept.push(c);
+  }
+  return list.filter(b=>!drop.has(b)).map(b=>copy.get(b)||b);
+}
 
 
 function draw(){
@@ -502,7 +523,8 @@ function draw(){
   // sehr grosse Zonen (mehr als 3x die typische Kerzengroesse im Ausschnitt) nur im Chart ausblenden; Meldungen und Statistik bleiben
   const rgs=cs.map(c=>c.h-c.l).sort((a,b)=>a-b);
   const maxZoneH=3*(rgs[Math.floor(rgs.length/2)]||0);
-  pickZones(fr.blocks.concat(fr.day||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0).forEach(b=>{
+  // hoechstens 3 Zonen im Chart, die dem Kurs am naechsten liegen; der Rest bleibt in der Liste
+  dedupeAlike(pickZones(fr.blocks.concat(fr.day||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0)).slice(0,3).forEach(b=>{
     zoneBox(b,cs,cw,W,padR,y,cl,null,false);
   });
   // nur Anzeige (wie TraderJe): M5-Orderblock mit Kerzen zwischen Block und Impuls. Kein Einstieg, keine Meldung, keine Statistik. Klick zeigt nur die Info.
