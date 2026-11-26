@@ -45,6 +45,9 @@ MARKETS = [
     ("dax", "DAX", ["DE40", "GER40", "DAX40"], 2, 500),
 ]
 
+# Maerkte ohne Telegram-Meldungen (Daten und Statistik laufen weiter)
+STUMM_MARKTE = {"eurusd"}
+
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
 APP_URL = "https://simonmeraner93-hub.github.io/Gold-Orderblock/"
@@ -780,6 +783,7 @@ def _dublette(b, zonen):
 
 
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
+    notify_ok = notify_ok and key not in STUMM_MARKTE   # stumme Maerkte: keine Meldungen, keine Statistik-Aenderung
     order =([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
     for ep in order:
