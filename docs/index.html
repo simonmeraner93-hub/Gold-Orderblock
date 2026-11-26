@@ -130,9 +130,7 @@ h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.01em}
     <label class="tog"><input type="checkbox" id="lv"> Tageshoch und Tagestief</label>
     <label class="tog"><input type="checkbox" id="hz"> H1-Zonen im M5-Chart</label>
     <label class="tog"><input type="checkbox" id="nah" checked> OB mit Zwischenkerzen (nur Anzeige)</label>
-    <label class="tog"><input type="checkbox" id="ema13" checked> EMA 13 (violett) im Chart</label>
-    <label class="tog"><input type="checkbox" id="bos" checked> BOS im Chart (nur Anzeige)</label>
-  </div>
+    <label class="tog"><input type="checkbox" id="ema13" checked> EMA 13 (violett) im Chart</label>  </div>
 
   <div class="card" id="zdet" hidden></div>
 
@@ -453,28 +451,6 @@ function pickZones(list,cs,lo,hi,limit){
   return limit?arr.slice(0,limit):arr;
 }
 
-// BOS (Break of Structure), nur Anzeige. Gleiche Erkennung wie im Bot: Schlusskurs ueber dem hoechsten Hoch der
-// letzten 10 Kerzen (bei Short unter dem tiefsten Tief). Ein Bruch desselben Niveaus wird nur einmal gezeichnet.
-// Keine Koerpergroesse-Bedingung (die gehoert zum Impuls im Bot). Keine Wirkung auf Regel, Einstieg oder Statistik.
-function bosSeries(cs){
-  const out=[];
-  for(let j=10;j<cs.length;j++){
-    let hiI=j-10, loI=j-10;
-    for(let q=j-10;q<j;q++){
-      if(cs[q].h>cs[hiI].h)hiI=q;
-      if(cs[q].l<cs[loI].l)loI=q;
-    }
-    if(cs[j].c>cs[hiI].h && !(cs[j-1].c>cs[hiI].h))out.push({i:j,k:hiI,t:cs[j].t,d:1,p:cs[hiI].h});
-    if(cs[j].c<cs[loI].l && !(cs[j-1].c<cs[loI].l))out.push({i:j,k:loI,t:cs[j].t,d:-1,p:cs[loI].l});
-  }
-  return out;
-}
-// Letzter BOS in Richtung der Zone, seit die Zone entstanden ist (nur Anzeige im Reiter)
-function bosChip(b,bl){
-  const dir=b.kind==="long"?1:-1;
-  const hit=bl.filter(x=>x.d===dir&&x.t>=b.t).pop();
-  return hit?'<span>BOS '+(hit.d>0?"↑":"↓")+' '+tm(hit.t)+'</span>':'';
-}
 
 function draw(){
   const d=window.devicePixelRatio||1;
@@ -494,7 +470,9 @@ function draw(){
   let lo=Math.min(...cs.map(c=>c.l)),hi=Math.max(...cs.map(c=>c.h));
   const pad=(hi-lo)*0.08||1;lo-=pad;hi+=pad;
   const padR=64,padT=10,padB=20;
-  const cw=(W-padR)/cs.length;
+  // FUT leere Kaestchen rechts der letzten Kerze: Zonen und Kurslinie reichen weiter nach rechts, der Chart zeigt etwas Zukunft
+  const FUT=10;
+  const cw=(W-padR)/(cs.length+FUT);
   const y=p=>padT+(hi-p)/(hi-lo)*(H-padT-padB);
   const cl=v=>Math.max(padT,Math.min(H-padB,v));
 
@@ -555,22 +533,6 @@ function draw(){
     em.forEach((v,i)=>{const x=i*cw+cw/2,yy=y(v);if(i)ctx.lineTo(x,yy);else ctx.moveTo(x,yy);});
     ctx.stroke();
     ctx.lineWidth=1;
-  }
-
-  // BOS (nur Anzeige): gestrichelte graue Linie vom Swing bis zum Durchbruch, ohne Einfluss auf Regel und Statistik
-  if($("bos").checked){
-    bosSeries(all).filter(b=>b.i>=s0&&b.i<s1).forEach(b=>{
-      const yy=y(b.p);
-      const xA=(Math.max(b.k,s0)-s0)*cw+cw/2, xB=(b.i-s0)*cw+cw/2;
-      ctx.strokeStyle="rgba(148,163,184,.85)";
-      ctx.lineWidth=1;
-      ctx.setLineDash([4,3]);
-      ctx.beginPath();ctx.moveTo(xA,yy);ctx.lineTo(xB,yy);ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle="rgba(148,163,184,1)";
-      ctx.textAlign="left";
-      ctx.fillText("BOS "+(b.d>0?"↑":"↓"),xB+3,yy-4);
-    });
   }
 
   if($("lv").checked){
@@ -676,7 +638,6 @@ function list(){
   const m=M();if(!m)return;
   $("zt").textContent="Zonen "+m.name+" · "+frame;
   const last=lastPrice(m);
-  const bosAll=bosSeries(m.frames[frame].candles);
   const rows=tradesFor(m,frame).sort((a,b)=>Math.abs((a.b.lo+a.b.hi)/2-last)-Math.abs((b.b.lo+b.b.hi)/2-last));
   const txt={
     ziel:"✓ 1:1 erreicht",
@@ -698,7 +659,7 @@ function list(){
     }
     return '<div class="zi '+b.kind+(b.with?'':' ag')+'" data-zk="'+b.kind+'-'+b.t+'"><div class="h"><span><b>'+(L?'▲ Long':'▼ Short')+'</b> <span class="r">'+fx(b.lo,m)+' – '+fx(b.hi,m)+'</span></span><span class="st '+(b.status==="angetestet"?"an":"")+'">'+(ST[b.status]||"")+'</span></div>'+
       '<div class="meta">'+tm(b.t)+'</div>'+
-      '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span>'+bosChip(b,bosAll)+'</div>'+checklist(b,m)+pt+'</div>';
+      '<div class="chips"><span>'+(b.fvg==="ja"?"FVG ✓":"FVG ?")+'</span><span>'+(b.with?"mit dem Trend":"gegen den Trend")+'</span></div>'+checklist(b,m)+pt+'</div>';
   }).join("")||'<p class="mut">Keine Zonen in diesem Fenster</p>';
 }
 
@@ -856,7 +817,7 @@ $("ov").addEventListener("click",e=>{
   saveUI();
   render();
 });
-["lv","hz","nah","ema13","bos"].forEach(id=>$(id).addEventListener("change",render));
+["lv","hz","nah","ema13"].forEach(id=>$(id).addEventListener("change",render));
 window.addEventListener("resize",draw);
 load();
 setInterval(load,60000);
