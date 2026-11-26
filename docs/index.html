@@ -505,10 +505,10 @@ function draw(){
   pickZones(fr.blocks.concat(fr.day||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0).forEach(b=>{
     zoneBox(b,cs,cw,W,padR,y,cl,null,false);
   });
-  // nur Anzeige (wie TraderJe): M5-Orderblock mit Kerzen zwischen Block und Impuls. Kein Einstieg, keine Meldung, keine Statistik, nicht anklickbar
+  // nur Anzeige (wie TraderJe): M5-Orderblock mit Kerzen zwischen Block und Impuls. Kein Einstieg, keine Meldung, keine Statistik. Klick zeigt nur die Info.
   if($("nah").checked&&frame==="M5"){
     pickZones((fr.anzeige||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0).forEach(b=>{
-      zoneBox(b,cs,cw,W,padR,y,cl,null,true,"nur Anzeige",true);
+      zoneBox(b,cs,cw,W,padR,y,cl,null,true,"nur Anzeige");
     });
   }
 
@@ -679,10 +679,20 @@ function zoneDetail(){
   let b=null;
   if(SEL&&m&&m.frames[SEL.tf]){
     const fr=m.frames[SEL.tf];
-    b=fr.blocks.concat(fr.day||[]).find(x=>x.kind+"-"+x.t===SEL.k)||null;
+    b=fr.blocks.concat(fr.day||[],fr.anzeige||[]).find(x=>x.kind+"-"+x.t===SEL.k)||null;
   }
   if(!b){d.hidden=true;d.innerHTML="";return;}
   const L=b.kind==="long";
+  if(b.nur_anzeige){
+    // nur Anzeige: wenige Angaben vorhanden, keine Berührungen, FVG oder Checkliste
+    d.hidden=false;
+    d.innerHTML='<div class="zdh"><b>'+(L?"▲ Long":"▼ Short")+'-Orderblock · '+SEL.tf+' · nur Anzeige</b><button class="btn z" id="zdx">×</button></div>'+
+      '<div class="zdr">'+fx(b.lo,m)+' – '+fx(b.hi,m)+' · '+(ST[b.status]||"")+'</div>'+
+      '<div class="sec2">Verlauf</div><div class="tl"><div><span class="tt">'+tm(b.t)+'</span>Zone entstanden</div></div>'+
+      '<p class="note">Nur Anzeige: Diese Zone löst keine Meldung aus, zählt nicht als Einstieg und geht nicht in die Statistik ein.</p>';
+    $("zdx").addEventListener("click",()=>{SEL=null;zoneDetail();});
+    return;
+  }
   const ev=[{t:b.t,s:"Zone entstanden"}];
   (b.visits||[]).forEach((v,i)=>ev.push({t:v.t,s:"Berührung "+(i+1)+": "+(v.in?"Schluss innerhalb der Zone":"Docht in der Zone, Schluss außerhalb")}));
   if(b.conf_t){const dd=entDist(m,SEL.tf,b);ev.push({t:b.conf_t,s:"Bestätigungskerze (Einstieg-Signal)"+(dd==null?"":" · Abstand "+fmtX(dd)+"× Zone")});}
