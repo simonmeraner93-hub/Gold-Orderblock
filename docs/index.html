@@ -531,8 +531,11 @@ function draw(){
   });
   // nur Anzeige (wie TraderJe): M5-Orderblock mit Kerzen zwischen Block und Impuls. Kein Einstieg, keine Meldung, keine Statistik. Klick zeigt nur die Info.
   if($("nah").checked&&frame==="M5"){
+    // Impuls-Zonen (ohne Strukturbruch): hoechstens 3 im Chart, die dem Kurs am naechsten liegen
+    let impulse=0;
     pickZones((fr.anzeige||[]).filter(b=>(b.hi-b.lo)<=maxZoneH),cs,lo,hi,0).forEach(b=>{
-      zoneBox(b,cs,cw,W,padR,y,cl,null,true,"nur Anzeige");
+      if(b.art==="impuls"){if(impulse>=3)return;impulse++;}
+      zoneBox(b,cs,cw,W,padR,y,cl,null,true,b.art==="impuls"?"Impuls, nur Anzeige":"nur Anzeige");
     });
   }
 
@@ -710,7 +713,7 @@ function zoneDetail(){
   if(b.nur_anzeige){
     // nur Anzeige: wenige Angaben vorhanden, keine Berührungen, FVG oder Checkliste
     d.hidden=false;
-    d.innerHTML='<div class="zdh"><b>'+(L?"▲ Long":"▼ Short")+'-Orderblock · '+SEL.tf+' · nur Anzeige</b><button class="btn z" id="zdx">×</button></div>'+
+    d.innerHTML='<div class="zdh"><b>'+(L?"▲ Long":"▼ Short")+'-Orderblock · '+SEL.tf+(b.art==="impuls"?' · Impuls ohne Strukturbruch':'')+' · nur Anzeige</b><button class="btn z" id="zdx">×</button></div>'+
       '<div class="zdr">'+fx(b.lo,m)+' – '+fx(b.hi,m)+' · '+(ST[b.status]||"")+'</div>'+
       '<div class="sec2">Verlauf</div><div class="tl"><div><span class="tt">'+tm(b.t)+'</span>Zone entstanden</div></div>'+
       '<p class="note">Nur Anzeige: Diese Zone löst keine Meldung aus, zählt nicht als Einstieg und geht nicht in die Statistik ein.</p>';
