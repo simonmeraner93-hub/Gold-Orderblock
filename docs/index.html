@@ -167,7 +167,7 @@ const TR={long:"▲ Long",short:"▼ Short",neutral:"► Neutral"};
 const LC={day:"96,165,250"};
 
 // Maerkte, die die App nicht zeigt (Bot und Daten laufen unveraendert weiter)
-const AUSGEBLENDET=["eurusd"];
+const AUSGEBLENDET=["eurusd","gbpusd"];
 function VALID(){return DATA?DATA.markets.filter(m=>m.frames&&m.frames.M5&&m.frames.H1&&!AUSGEBLENDET.includes(m.key)):[];}
 function M(){const v=VALID();return v.find(m=>m.key===cur)||v[0]||null;}
 function fx(v,m){return v.toFixed(m.dec>2?m.dec:(m.price>1000?1:2));}
