@@ -46,7 +46,7 @@ MARKETS = [
 ]
 
 # Maerkte ohne Telegram-Meldungen (Daten und Statistik laufen weiter)
-STUMM_MARKTE = {"eurusd"}
+STUMM_MARKTE = {"eurusd", "gbpusd"}
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TELEGRAM_CHAT_ID"]
@@ -752,6 +752,60 @@ def anzeige_out(b, dec, trend):
     }
 
 
+def impuls_blocks(df, regulaer):
+    """Nur Anzeige (M5): Impuls OHNE Strukturbruch. Starke Kerze (Koerper >= STRONG x Durchschnitt der letzten 20),
+    die das Hoch/Tief der letzten SWING Kerzen NICHT bricht. Block = letzte Gegenkerze in den 5 Kerzen davor.
+    Keine Meldung, kein Einstieg, keine Statistik. Entfaellt, wenn eine regulaere Zone gleicher Richtung sie zu mehr als der Haelfte ueberdeckt."""
+    body = (df["close"] - df["open"]).abs()
+    out, seen = [], set()
+    for i in range(SWING + 20, len(df)):
+        avg = float(body.iloc[i - 20:i].mean())
+        if not avg > 0 or body.iloc[i] < STRONG * avg:
+            continue
+        c = df.iloc[i]
+        prev = df.iloc[i - SWING:i]
+        if c.close > c.open and not c.close > prev.high.max():
+            kind = "long"
+        elif c.close < c.open and not c.close < prev.low.min():
+            kind = "short"
+        else:
+            continue
+        blk = None
+        for k in range(i - 1, max(i - 6, 0), -1):
+            o = df.iloc[k]
+            if (kind == "long" and o.close < o.open) or (kind == "short" and o.close > o.open):
+                blk = k
+                break
+        if blk is None or (kind, blk) in seen:
+            continue
+        seen.add((kind, blk))
+        lo, hi = float(df.iloc[blk].low), float(df.iloc[blk].high)
+        if not hi > lo:
+            continue
+        if any(r["kind"] == kind and min(r["hi"], hi) - max(r["lo"], lo) > 0.5 * (hi - lo) for r in regulaer):
+            continue
+        # Status wie bei den Zonen: angetestet, oder ungueltig (zwei Schluesse hintereinander auf der falschen Seite oder tief darueber)
+        status, consec, zh = "frisch", 0, hi - lo
+        for j in range(i + 1, len(df)):
+            cj = df.iloc[j]
+            if kind == "long":
+                beyond, depth, touch = cj.close < lo, lo - cj.close, cj.low <= hi
+            else:
+                beyond, depth, touch = cj.close > hi, cj.close - hi, cj.high >= lo
+            if beyond:
+                consec += 1
+                if consec >= 2 or depth > 0.5 * zh:
+                    status = "ungueltig"
+                    break
+            else:
+                consec = 0
+            if touch:
+                status = "angetestet"
+        out.append({"kind": kind, "lo": lo, "hi": hi, "t": int(df.iloc[blk].time.timestamp()),
+                    "status": status, "i": i, "k": blk})
+    return out
+
+
 DUP_OVERLAP = 0.5   # "Neuer"-Meldung entfaellt, wenn eine aeltere gueltige Zone gleicher Richtung
                     # mehr als diesen Anteil der neuen Zonenhoehe ueberdeckt (dieselbe Zone, andere Kerze)
 
@@ -783,7 +837,7 @@ def _dublette(b, zonen):
 
 
 def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step, prev_epic):
-    notify_ok = notify_ok and key not in STUMM_MARKTE   # stumme Maerkte: keine Meldungen, keine Statistik-Aenderung
+    notify_ok = notify_ok and key not in STUMM_MARKTE   # stumme Maerkte: keine Telegram-Meldungen
     order =([prev_epic] if prev_epic else []) + [c for c in cands if c != prev_epic]
     epic, h1_full, m5_full, err = None, None, None, None
     for ep in order:
@@ -827,6 +881,7 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         b["nur_anzeige"] = (b["kind"], b["t"]) not in strict_h1
     show_blocks = {"M5": blocks["M5"], "H1": [b for b in h1_show if b["adj"]]}
     valid_h1 = [b for b in blocks["H1"] if b["status"] != "ungueltig"]
+    impuls = impuls_blocks(dfs["M5"][0], blocks["M5"])   # nur Anzeige, keine Meldung und keine Statistik
 
     # Antest durch die noch laufende Kerze sofort erkennen (nicht erst nach Kerzenschluss)
     for tf, (df, full, mins) in dfs.items():
@@ -1030,6 +1085,8 @@ def process_market(h, state, now, cutoff, notify_ok, key, name, cands, dec, step
         if tf == "M5":
             anzeige = [anzeige_out(b, dec, trend) for b in show_blocks[tf]
                        if not b["adj"] and b["status"] != "ungueltig" and b["t"] >= first_t]
+            anzeige += [dict(anzeige_out(b, dec, trend), art="impuls") for b in impuls
+                        if b["status"] != "ungueltig" and b["t"] >= first_t]
         frames[tf] = {"candles": candles, "blocks": zones, "day": day_zones, "day_start": day_start,
                       "anzeige": anzeige}
     # LTF-Statistiktest: H1-Zone, Bestaetigung auf M5 (nur Statistik, keine Meldung)
